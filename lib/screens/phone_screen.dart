@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../i18n/app_strings.dart';
 import '../services/voice_service.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
@@ -43,7 +44,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('启动通话失败：$e')),
+          SnackBar(content: Text('${context.strs.callStartFailed}$e')),
         );
       }
     }
@@ -59,18 +60,20 @@ class _PhoneScreenState extends State<PhoneScreen> {
     Navigator.of(context).pop();
   }
 
-  String _statusLabel({
+  String _statusLabel(
+    AppStrings strs, {
     required bool active,
     required bool connected,
     required bool heard,
   }) {
     if (!active) return '';
-    if (!connected) return '连接中…';
-    return heard ? '' : '请说话';
+    if (!connected) return strs.connecting;
+    return heard ? '' : strs.pleaseSpeak;
   }
 
   @override
   Widget build(BuildContext context) {
+    final strs = context.strs;
     final app = context.watch<AppState>();
     final charName = (app.currentCharacter?.displayName.isNotEmpty ?? false)
         ? app.currentCharacter!.displayName
@@ -105,23 +108,23 @@ class _PhoneScreenState extends State<PhoneScreen> {
               itemBuilder: (context, i) => _eventTile(_log[i]),
             );
           } else if (!active || !conn) {
-            center = const Center(
+            center = Center(
               child: Text(
-                '正在建立通话…',
-                style: TextStyle(color: AppTheme.textSecondary),
+                strs.establishingCall,
+                style: const TextStyle(color: AppTheme.textSecondary),
               ),
             );
           } else {
-            center = const Center(
+            center = Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.mic, size: 36, color: AppTheme.primary),
-                  SizedBox(height: 10),
+                  const Icon(Icons.mic, size: 36, color: AppTheme.primary),
+                  const SizedBox(height: 10),
                   Text(
-                    '请说话',
-                    style:
-                        TextStyle(fontSize: 18, color: AppTheme.textSecondary),
+                    strs.pleaseSpeak,
+                    style: const TextStyle(
+                        fontSize: 18, color: AppTheme.textSecondary),
                   ),
                 ],
               ),
@@ -149,7 +152,8 @@ class _PhoneScreenState extends State<PhoneScreen> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  _statusLabel(active: active, connected: conn, heard: heard),
+                  _statusLabel(strs,
+                      active: active, connected: conn, heard: heard),
                   style: const TextStyle(
                       fontSize: 13, color: AppTheme.textSecondary),
                 ),
@@ -158,28 +162,28 @@ class _PhoneScreenState extends State<PhoneScreen> {
           ),
           Expanded(child: center),
           if (speaking)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.hearing, size: 16, color: AppTheme.primary),
-                  SizedBox(width: 6),
-                  Text('正在听你说…',
-                      style: TextStyle(color: AppTheme.primary, fontSize: 13)),
+                  const Icon(Icons.hearing, size: 16, color: AppTheme.primary),
+                  const SizedBox(width: 6),
+                  Text(strs.listeningHint,
+                      style: const TextStyle(color: AppTheme.primary, fontSize: 13)),
                 ],
               ),
             ),
           if (ttsBusy)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.graphic_eq, size: 16, color: AppTheme.primary),
-                  SizedBox(width: 6),
-                  Text('AI 正在说话…',
-                      style: TextStyle(color: AppTheme.primary, fontSize: 13)),
+                  const Icon(Icons.graphic_eq, size: 16, color: AppTheme.primary),
+                  const SizedBox(width: 6),
+                  Text(strs.aiSpeakingHint,
+                      style: const TextStyle(color: AppTheme.primary, fontSize: 13)),
                 ],
               ),
             ),
@@ -195,9 +199,9 @@ class _PhoneScreenState extends State<PhoneScreen> {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Text(
-                          '诊断: 已发音频 ${(sent / 1024).toStringAsFixed(0)}KB · '
-                          '连接${conn ? "正常" : "未通"} · '
-                          '录音${active ? "中" : "停"}',
+                          '${strs.diagSent}${(sent / 1024).toStringAsFixed(0)}KB'
+                          '${strs.diagConn}${conn ? strs.connOk : strs.connFail}'
+                          '${strs.diagRec}${active ? strs.recOn : strs.recOff}',
                           style: const TextStyle(
                               fontSize: 11, color: AppTheme.textSecondary),
                         ),
@@ -270,7 +274,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
       case VoiceUserText():
         child = Align(
           alignment: Alignment.centerRight,
-          child: _bubble('我', event.text, isUser: true),
+          child: _bubble(context.strs.userBubble, event.text, isUser: true),
         );
       case VoiceAssistantText():
         child = Align(

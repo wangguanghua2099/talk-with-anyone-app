@@ -1,28 +1,20 @@
 // HTTP 客户端：统一处理 baseUrl、访问口令、局域网自签名证书
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
-import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+
+// Web 平台没有 dart:io，需要按平台选择底层实现
+// ignore: unnecessary_import
+import 'api_client_io.dart'
+    if (dart.library.js_interop) 'api_client_web.dart' as api_impl;
 
 class ApiClient {
   /// 创建针对某台服务器的 Dio 实例。
   /// - 自签名证书一律信任（局域网自用场景）
   /// - access_token 非空时自动附加 Authorization 头
   static Dio create({required String baseUrl, required String token}) {
-    final dio = Dio(
-      BaseOptions(
-        baseUrl: _normalize(baseUrl),
-        connectTimeout: const Duration(seconds: 8),
-        receiveTimeout: const Duration(seconds: 30),
-        sendTimeout: const Duration(seconds: 30),
-        headers: token.trim().isEmpty ? null : {'Authorization': 'Bearer ${token.trim()}'},
-      ),
-    );
-    dio.httpClientAdapter = _TrustAllAdapter();
-    return dio;
+    return api_impl.createDio(baseUrl: baseUrl, token: token);
   }
 
   /// 提取 baseUrl 前的 host，用于拼接 WebSocket 地址（同一主机）。
@@ -38,9 +30,7 @@ class ApiClient {
 
   /// 建立 WebSocket 连接（wss 到局域网自签名证书服务器，需忽略证书校验）
   static WebSocketChannel connectWs(Uri uri) {
-    final client = HttpClient();
-    client.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
-    return IOWebSocketChannel.connect(uri, customClient: client);
+    return api_impl.connectWs(uri);
   }
 
   /// 拼接带 token 与查询参数的 HTTP(S) URL（用于 TTS 流式等 GET 端点）。
@@ -93,17 +83,4 @@ class ApiClient {
     }
     return s;
   }
-}
-
-/// 信任所有自签名证书（仅限局域网自用；若日后暴露公网请改为证书锁定）
-class _TrustAllAdapter extends IOHttpClientAdapter {
-  _TrustAllAdapter()
-      : super(
-          createHttpClient: () {
-            final client = HttpClient();
-            client.badCertificateCallback =
-                (X509Certificate cert, String host, int port) => true;
-            return client;
-          },
-        );
 }

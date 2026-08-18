@@ -1,4 +1,6 @@
 // 服务器接口封装：连接测试、角色、会话、聊天
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import '../models/models.dart';
@@ -29,6 +31,19 @@ class ServerService {
   Future<Map<String, dynamic>> getConfig() async {
     final resp = await _dio.get('/api/config');
     return resp.data as Map<String, dynamic>;
+  }
+
+  /// 更新服务器全局配置（POST /api/config，未传字段保持不变）
+  Future<void> updateConfig(Map<String, dynamic> data) async {
+    await _dio.post('/api/config', data: data);
+  }
+
+  /// 上传用户头像（POST /api/avatar/upload，avatar 为 base64 data URI，target=user）
+  Future<void> uploadUserAvatar(String dataUri) async {
+    await _dio.post('/api/avatar/upload', data: {
+      'avatar': dataUri,
+      'target': 'user',
+    });
   }
 
   Future<List<Conversation>> searchConversations(String query) async {
@@ -91,5 +106,140 @@ class ServerService {
 
   Future<void> selectCharacter(String id) async {
     await _dio.post('/api/characters/select', data: {'id': id});
+  }
+
+  /// 新增角色（POST /api/characters），返回创建后的角色
+  Future<Character> addCharacter(Map<String, dynamic> data) async {
+    final resp = await _dio.post('/api/characters', data: data);
+    final char = (resp.data as Map<String, dynamic>)['character'] as Map<String, dynamic>;
+    return Character.fromJson(char);
+  }
+
+  /// 更新角色（PUT /api/characters/{id}，未传字段保持不变）
+  Future<Character> updateCharacter(String id, Map<String, dynamic> data) async {
+    final resp = await _dio.put('/api/characters/$id', data: data);
+    final char = (resp.data as Map<String, dynamic>)['character'] as Map<String, dynamic>;
+    return Character.fromJson(char);
+  }
+
+  /// 删除角色（DELETE /api/characters/{id}）
+  Future<void> deleteCharacter(String id) async {
+    await _dio.delete('/api/characters/$id');
+  }
+
+  /// 上传 AI（角色）头像（POST /api/avatar/upload，保存到当前角色 ai_avatar）
+  Future<void> uploadAiAvatar(String dataUri) async {
+    await _dio.post('/api/avatar/upload', data: {
+      'avatar': dataUri,
+      'target': 'ai',
+    });
+  }
+
+  /// TTS 引擎列表 + 当前引擎（GET /api/tts/engines）
+  Future<({List<String> engines, String current})> getTtsEngines() async {
+    final resp = await _dio.get('/api/tts/engines');
+    final data = resp.data as Map<String, dynamic>;
+    return (
+      engines: (data['engines'] as List? ?? [])
+          .map((e) => e.toString())
+          .toList(),
+      current: (data['current'] as String?) ?? '',
+    );
+  }
+
+  /// 切换 TTS 引擎（POST /api/tts/engine）
+  Future<void> switchTtsEngine(String engine) async {
+    await _dio.post('/api/tts/engine', data: {'engine': engine});
+  }
+
+  /// 当前引擎的音色列表（GET /api/tts/voices）
+  Future<List<String>> getTtsVoices() async {
+    final resp = await _dio.get('/api/tts/voices');
+    final data = resp.data as Map<String, dynamic>;
+    return (data['voices'] as List? ?? []).map((e) => e.toString()).toList();
+  }
+
+  /// 合成音频并保存到服务器，返回文件路径（POST /api/tts/synthesize）
+  Future<String> synthesize(String text, String voice) async {
+    final resp = await _dio.post(
+      '/api/tts/synthesize',
+      data: {'text': text, 'voice': voice},
+    );
+    final data = resp.data as Map<String, dynamic>;
+    return (data['audio'] as String?) ?? '';
+  }
+
+  /// 自定义音色列表（GET /api/tts/custom-voices）
+  Future<List<Map<String, dynamic>>> getCustomVoices() async {
+    final resp = await _dio.get('/api/tts/custom-voices');
+    final data = resp.data as Map<String, dynamic>;
+    return (data['voices'] as List? ?? []).cast<Map<String, dynamic>>();
+  }
+
+  /// 添加自定义音色（POST /api/tts/custom-voices，multipart）
+  Future<void> addCustomVoice({
+    required String name,
+    required String refText,
+    required String fileName,
+    required List<int> fileBytes,
+  }) async {
+    final file = MultipartFile.fromBytes(
+      fileBytes,
+      filename: fileName,
+    );
+    final formData = FormData.fromMap({
+      'name': name,
+      'ref_text': refText,
+      'file': file,
+    });
+    await _dio.post(
+      '/api/tts/custom-voices',
+      data: formData,
+      options: Options(contentType: 'multipart/form-data'),
+    );
+  }
+
+  /// 删除自定义音色（DELETE /api/tts/custom-voices/{id}）
+  Future<void> deleteCustomVoice(String voiceId) async {
+    await _dio.delete('/api/tts/custom-voices/$voiceId');
+  }
+
+  /// 上传音频转写为文字（POST /api/stt/transcribe）
+  Future<String> transcribeAudio(Uint8List wavBytes) async {
+    final file = MultipartFile.fromBytes(wavBytes, filename: 'speech.wav');
+    final formData = FormData.fromMap({'file': file});
+    final resp = await _dio.post(
+      '/api/stt/transcribe',
+      data: formData,
+      options: Options(contentType: 'multipart/form-data'),
+    );
+    return (resp.data as Map<String, dynamic>)['text']?.toString() ?? '';
+  }
+
+  /// 抓取网页正文文本（POST /api/web/fetch）
+  Future<String> fetchWebContent(String url) async {
+    final resp = await _dio.post('/api/web/fetch', data: {'url': url});
+    return (resp.data as Map<String, dynamic>)['content']?.toString() ?? '';
+  }
+
+  /// 拉取 LLM 服务商可用模型列表（POST /api/llm/models）
+  Future<List<String>> getLlmModels({
+    required String backend,
+    required String url,
+    required String apiKey,
+  }) async {
+    final resp = await _dio.post(
+      '/api/llm/models',
+      data: {
+        'llm_backend': backend,
+        'llm_url': url,
+        'llm_api_key': apiKey,
+      },
+    );
+    final data = resp.data as Map<String, dynamic>;
+    final models = (data['models'] as List? ?? [])
+        .whereType<String>()
+        .toList();
+    return models;
   }
 }

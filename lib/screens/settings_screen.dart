@@ -1,8 +1,11 @@
-// 设置页（占位）：右侧边栏各功能项的入口，功能下期实现
+// 设置页：LLM 设置（进入 llm_settings_screen）+ 语言切换
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../i18n/app_strings.dart';
+import '../state/app_state.dart';
 import '../theme.dart';
+import 'llm_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -10,24 +13,40 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strs = context.strs;
+    final app = context.watch<AppState>();
     return Scaffold(
       appBar: AppBar(title: Text(strs.settings)),
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          _group(context, [
-            _item(context, Icons.smart_toy_outlined, strs.llmSettings),
-            _item(context, Icons.record_voice_over_outlined, strs.ttsEngine),
-          ]),
-          _group(context, [
-            _item(context, Icons.person_outline, strs.userSettings),
-            _item(context, Icons.volume_up_outlined, strs.readAloud),
-          ]),
-          _group(context, [
-            _item(context, Icons.lock_outline, strs.accessToken),
-            _item(context, Icons.language, strs.language),
-            _item(context, Icons.bug_report_outlined, strs.debugLogs),
-          ]),
+          _group(
+            context,
+            [
+              _navItem(context, Icons.smart_toy_outlined, strs.llmSettings,
+                  const LlmSettingsScreen()),
+            ],
+          ),
+          _group(
+            context,
+            [
+              ListTile(
+                leading: const Icon(Icons.language, color: AppTheme.primary),
+                title: Text(strs.language),
+                trailing: DropdownButton<String>(
+                  value: app.isEn ? 'en' : 'zh',
+                  underline: const SizedBox.shrink(),
+                  items: const [
+                    DropdownMenuItem(value: 'zh', child: Text('简体中文')),
+                    DropdownMenuItem(value: 'en', child: Text('English')),
+                  ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    app.setLocale(isEn: v == 'en');
+                  },
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -41,19 +60,26 @@ class SettingsScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         side: const BorderSide(color: AppTheme.border),
       ),
-      child: Column(children: tiles),
+      child: Column(
+        children: [
+          for (var i = 0; i < tiles.length; i++) ...[
+            if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
+            tiles[i],
+          ],
+        ],
+      ),
     );
   }
 
-  Widget _item(BuildContext context, IconData icon, String title) {
+  Widget _navItem(BuildContext context, IconData icon, String title, Widget page) {
     return ListTile(
       leading: Icon(icon, color: AppTheme.primary),
       title: Text(title),
       trailing: const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
       onTap: () {
-        final strs = context.strs;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('「$title」${strs.comingSoon}')),
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => page),
         );
       },
     );

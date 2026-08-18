@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../i18n/app_strings.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 import 'chat_screen.dart';
@@ -37,7 +38,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Future<void> _test() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
-      setState(() => _error = '请输入服务器地址，例如 https://192.168.1.100:7862');
+      setState(() => _error = context.strs.urlRequiredError);
       return;
     }
     setState(() {
@@ -54,7 +55,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
         MaterialPageRoute(builder: (_) => const ChatScreen()),
       );
     } catch (e) {
-      setState(() => _error = '连接失败：$e');
+      String msg;
+      if (e is AuthException) {
+        msg = context.strs.authFailed;
+      } else {
+        msg = '${context.strs.connectFailed}$e';
+      }
+      setState(() => _error = msg);
     } finally {
       if (mounted) setState(() => _testing = false);
     }
@@ -62,6 +69,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final strs = context.strs;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -81,30 +89,30 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    '连接到你的电脑上的服务器',
+                  Text(
+                    strs.connectSubtitle,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: AppTheme.textSecondary),
+                    style: const TextStyle(color: AppTheme.textSecondary),
                   ),
                   const SizedBox(height: 32),
                   TextField(
                     controller: _urlController,
                     keyboardType: TextInputType.url,
                     autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: '服务器地址',
+                    decoration: InputDecoration(
+                      labelText: strs.serverUrlLabel,
                       hintText: 'https://192.168.1.100:7862',
-                      prefixIcon: Icon(Icons.dns_outlined),
+                      prefixIcon: const Icon(Icons.dns_outlined),
                     ),
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: _tokenController,
                     obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: '访问口令（可选）',
-                      hintText: '与服务器 config.json 的 access_token 一致',
-                      prefixIcon: Icon(Icons.lock_outline),
+                    decoration: InputDecoration(
+                      labelText: strs.accessTokenLabel,
+                      hintText: strs.accessTokenHint,
+                      prefixIcon: const Icon(Icons.lock_outline),
                     ),
                   ),
                   if (_error != null) ...[
@@ -123,7 +131,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                           )
-                        : const Text('连接并测试'),
+                        : Text(strs.connectAndTest),
                   ),
                 ],
               ),

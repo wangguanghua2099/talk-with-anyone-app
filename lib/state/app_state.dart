@@ -5,6 +5,14 @@ import '../models/models.dart';
 import '../services/prefs.dart';
 import '../services/server_service.dart';
 
+/// 访问口令错误或无权访问（界面按语言提示）
+class AuthException implements Exception {
+  const AuthException();
+
+  @override
+  String toString() => 'AuthException';
+}
+
 class AppState extends ChangeNotifier {
   String baseUrl = '';
   String token = '';
@@ -93,7 +101,7 @@ class AppState extends ChangeNotifier {
       try {
         await service.getCharacters();
       } catch (_) {
-        throw Exception('访问口令错误或无权访问');
+        throw const AuthException();
       }
     }
     this.baseUrl = baseUrl.trim();
