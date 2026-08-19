@@ -2,6 +2,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
+import '../services/offline_cache.dart';
 import '../services/prefs.dart';
 import '../services/server_service.dart';
 
@@ -19,6 +20,20 @@ class AppState extends ChangeNotifier {
   ServerInfo? serverInfo;
   ServerService? service;
   bool connected = false;
+
+  /// 是否处于离线模式（连不上服务器、正在展示上次同步的缓存）。
+  /// 离线时禁止一切写操作（增删改都在服务器上以服务器数据为准）。
+  bool offline = false;
+  bool get needsNetwork => offline;
+
+  /// 离线时用户正在浏览的会话 id（可为空，表示浏览缓存里记录的当前会话）
+  String offlineConvId = '';
+
+  /// 离线浏览某个会话：只切换本地浏览目标，不动服务器
+  Future<void> setOfflineConv(String id) async {
+    offlineConvId = id;
+    bumpConv();
+  }
 
   /// 角色列表缓存 + 当前角色
   List<Character> characters = const [];
@@ -77,10 +92,35 @@ class AppState extends ChangeNotifier {
       characters = chars;
       currentCharacter = cur;
       characterVersion++;
+      setOnline();
       notifyListeners();
     } catch (_) {
-      // 加载失败不阻塞聊天
+      // 连不上服务器：回退到上次同步的缓存，进入离线模式
+      final cached = await OfflineCache.loadCharacters();
+      characters = cached.characters;
+      for (final c in characters) {
+        if (c.id == cached.currentId) {
+          currentCharacter = c;
+          break;
+        }
+      }
+      characterVersion++;
+      setOffline();
+      notifyListeners();
     }
+  }
+
+  /// 标记在线/离线并通知界面（值未变化时不重复通知）
+  void setOnline() {
+    if (!offline) return;
+    offline = false;
+    notifyListeners();
+  }
+
+  void setOffline() {
+    if (offline) return;
+    offline = true;
+    notifyListeners();
   }
 
   Future<void> selectCharacter(String id) async {
@@ -115,11 +155,16 @@ class AppState extends ChangeNotifier {
 
   Future<void> disconnect() async {
     await Prefs.clear();
+    await OfflineCache.clear();
     baseUrl = '';
     token = '';
     service = null;
     serverInfo = null;
     connected = false;
+    offline = false;
+    offlineConvId = '';
+    characters = const [];
+    currentCharacter = null;
     notifyListeners();
   }
 }

@@ -14,6 +14,7 @@ class AppStrings {
     required this.messageCount,
     required this.rename,
     required this.delete,
+    required this.confirmDeleteConversation,
     required this.cancel,
     required this.save,
     required this.retry,
@@ -90,6 +91,8 @@ class AppStrings {
     required this.noSpeechDetected,
     required this.webSaveUnsupported,
     required this.savedPathPrefix,
+    required this.offlineModeBanner,
+    required this.networkRequired,
     // 朗读工具箱
     required this.readWeb,
     required this.webUrlHint,
@@ -154,9 +157,8 @@ class AppStrings {
     required this.deleteVoiceConfirmSuf,
     // 电话页
     required this.callStartFailed,
-    required this.connecting,
     required this.pleaseSpeak,
-    required this.establishingCall,
+    required this.callConnected,
     required this.listeningHint,
     required this.aiSpeakingHint,
     required this.diagSent,
@@ -211,6 +213,7 @@ class AppStrings {
   final String messageCount;
   final String rename;
   final String delete;
+  final String confirmDeleteConversation;
   final String cancel;
   final String save;
   final String retry;
@@ -288,6 +291,8 @@ class AppStrings {
   final String noSpeechDetected;
   final String webSaveUnsupported;
   final String savedPathPrefix;
+  final String offlineModeBanner;
+  final String networkRequired;
 
   // 朗读工具箱
   final String readWeb;
@@ -359,9 +364,8 @@ class AppStrings {
 
   // 电话页
   final String callStartFailed;
-  final String connecting;
   final String pleaseSpeak;
-  final String establishingCall;
+  final String callConnected;
   final String listeningHint;
   final String aiSpeakingHint;
   final String diagSent;
@@ -438,6 +442,7 @@ class AppStrings {
     messageCount: '条消息',
     rename: '重命名',
     delete: '删除',
+    confirmDeleteConversation: '确定删除该对话吗？',
     cancel: '取消',
     save: '保存',
     retry: '重试',
@@ -513,6 +518,8 @@ class AppStrings {
     noSpeechDetected: '未识别到语音内容',
     webSaveUnsupported: '网页调试版不支持保存到手机，请用手机 App 使用该功能',
     savedPathPrefix: '已保存：',
+    offlineModeBanner: '离线模式（内容为最近一次同步，修改需服务器连接）',
+    networkRequired: '该操作需要联接服务器',
     readWeb: '朗读网页',
     webUrlHint: '输入网页地址...',
     readText: '朗读文本',
@@ -570,9 +577,8 @@ class AppStrings {
     deleteVoiceConfirmPre: '确定删除音色',
     deleteVoiceConfirmSuf: '吗？',
     callStartFailed: '启动通话失败：',
-    connecting: '连接中…',
     pleaseSpeak: '请说话',
-    establishingCall: '正在建立通话…',
+    callConnected: '通话已连接',
     listeningHint: '正在听你说…',
     aiSpeakingHint: 'AI 正在说话…',
     diagSent: '诊断: 已发音频 ',
@@ -622,6 +628,7 @@ class AppStrings {
     messageCount: 'messages',
     rename: 'Rename',
     delete: 'Delete',
+    confirmDeleteConversation: 'Delete this conversation?',
     cancel: 'Cancel',
     save: 'Save',
     retry: 'Retry',
@@ -698,6 +705,8 @@ class AppStrings {
     webSaveUnsupported:
         'Saving to phone is not supported in the web debug version. Please use the mobile app.',
     savedPathPrefix: 'Saved to: ',
+    offlineModeBanner: 'Offline mode (content from last sync; Edits require server)',
+    networkRequired: 'This action requires a server connection',
     readWeb: 'Read webpage',
     webUrlHint: 'Enter a web address...',
     readText: 'Read text',
@@ -758,9 +767,8 @@ class AppStrings {
     deleteVoiceConfirmPre: 'Delete voice ',
     deleteVoiceConfirmSuf: '?',
     callStartFailed: 'Failed to start the call: ',
-    connecting: 'Connecting…',
     pleaseSpeak: 'Speak now',
-    establishingCall: 'Establishing call…',
+    callConnected: 'Call connected',
     listeningHint: 'Listening to you…',
     aiSpeakingHint: 'AI is speaking…',
     diagSent: 'Diag: sent audio ',

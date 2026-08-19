@@ -31,6 +31,16 @@ class AppDrawer extends StatelessWidget {
               name: cur?.displayName ?? 'AI',
               hint: strs.currentCharacter,
             ),
+            if (app.offline)
+              Container(
+                width: double.infinity,
+                color: const Color(0xFFFFF3CD),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Text(
+                  strs.offlineModeBanner,
+                  style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+                ),
+              ),
             Expanded(
               child: ListView(
                 padding: EdgeInsets.zero,
@@ -46,9 +56,15 @@ class AppDrawer extends StatelessWidget {
                       ),
                     ),
                     onTap: () async {
-                      Navigator.pop(context);
-                      final service = context.read<AppState>().service;
                       final app = context.read<AppState>();
+                      if (app.offline) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(context.strs.networkRequired)),
+                        );
+                        return;
+                      }
+                      Navigator.pop(context);
+                      final service = app.service;
                       if (service == null) return;
                       try {
                         await service.createConversation();

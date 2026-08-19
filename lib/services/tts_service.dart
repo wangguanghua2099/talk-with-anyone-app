@@ -110,7 +110,7 @@ class TtsService {
 
     // 1) WebSocket 分块流式播放（主路径，低延迟）
     if (_gen == gen) {
-      played = await _tryWsStream(text, v);
+      played = await _tryWsStream(text, v, gen);
     }
 
     // 2) HTTP 下载播放（最稳兜底；被打断时绝不再走兜底）
@@ -132,7 +132,7 @@ class TtsService {
   /// 之后的块用 addAudioSource 依次追加到列表尾部无缝衔接，实现边生成边播；
   /// 服务器发完 audio.done 且播放器走到 completed 才算整体结束。
   /// 播放追上数据（欠载）时，新块到达会自动续播。
-  Future<bool> _tryWsStream(String text, String? v) async {
+  Future<bool> _tryWsStream(String text, String? v, int gen) async {
     final uri = ApiClient.webSocketUri(baseUrl, '/ws/tts-stream', token: token);
     final channel = ApiClient.connectWs(uri);
     _channel = channel;
@@ -245,15 +245,18 @@ class TtsService {
           case 'audio.done':
             final path = msg['path'] as String?;
             if (path != null && path.isNotEmpty) {
-              // 引擎不支持流式时服务器只返回文件路径 → 下载后播放
+              // 引擎不支持流式（如 edge）：服务器只返回文件路径 → 下载后播放。
+              // 必须等到真的播完才算本轮成功，否则 speak() 提前返回，
+              // 连续朗读下一句会立刻 stop() 把还没播出来的声音掐掉。
               enqueue(() async {
                 serverDone = true;
                 if (chunkCount > 0) {
-                  // 已经流式播了一部分，等播完即可
+                  // 已经流式播了一部分，等播完即可（playerStateStream 收尾）
                   return;
                 }
-                await finish(true, '下载服务器音频播放');
-                unawaited(_playDownloadedPath(path));
+                timer?.cancel();
+                final ok = await _playDownloadedPath(path, gen);
+                await finish(ok, ok ? '下载服务器音频播放' : '下载服务器音频播放失败');
               });
             } else {
               enqueue(() async {
@@ -289,8 +292,13 @@ class TtsService {
     return ok;
   }
 
-  /// 播放服务器合成好的文件（引擎不支持流式时的 audio.done 带 path 场景）
-  Future<void> _playDownloadedPath(String path) async {
+  /// 播放服务器合成好的文件（引擎不支持流式时的 audio.done 带 path 场景，
+  /// 如 edge 引擎返回 /static/current_audio.mp3）。
+  ///
+  /// [gen] 为本轮朗读代号：下载/播放途中若被 stop()（_gen 变化或播放器被
+  /// stop 归为 idle）立即中止并返回 false；且必须等到真正播完才返回 true，
+  /// 否则 speak() 提前返回，连续朗读的下一句会立刻 stop() 把声音掐掉。
+  Future<bool> _playDownloadedPath(String path, int gen) async {
     try {
       final dio = ApiClient.create(baseUrl: baseUrl, token: token)
         ..options.receiveTimeout = const Duration(minutes: 3);
@@ -300,25 +308,37 @@ class TtsService {
         url,
         options: Options(responseType: ResponseType.bytes),
       );
+      if (_gen != gen) return false; // 已被打断：放弃旧内容
       final data = resp.data;
-      if (data == null || data.isEmpty) return;
-      final wav = Uint8List.fromList(data);
-      await _player.setAudioSource(_BytesAudioSource(wav));
+      if (data == null || data.isEmpty) return false;
+      final bytes = Uint8List.fromList(data);
+      // edge 输出 MP3、其他引擎输出 WAV —— 按扩展名给对类型，否则解码失败
+      final isMp3 = path.toLowerCase().endsWith('.mp3');
+      await _player.setAudioSource(
+        _BytesAudioSource(bytes, contentType: isMp3 ? 'audio/mpeg' : 'audio/wav'),
+      );
+      if (_gen != gen) return false;
       await _player.play();
-      final done = Completer<void>();
+      final done = Completer<bool>();
       final sub = _player.playerStateStream.listen((state) {
-        if (state.processingState == ProcessingState.completed &&
-            !done.isCompleted) {
-          done.complete();
+        if (done.isCompleted) return;
+        if (state.processingState == ProcessingState.completed) {
+          done.complete(true);
+        } else if (state.processingState == ProcessingState.idle) {
+          // 被 stop()/新朗读打断回到 idle，视为未播完
+          done.complete(false);
         }
       });
       try {
-        await done.future.timeout(const Duration(minutes: 5), onTimeout: () {});
+        final ok = await done.future
+            .timeout(const Duration(minutes: 5), onTimeout: () => false);
+        return _gen == gen && ok;
       } finally {
         await sub.cancel();
       }
     } catch (e) {
       debugPrint('[TTS] 下载路径播放失败: $e');
+      return false;
     }
   }
 
@@ -351,11 +371,32 @@ class TtsService {
         lastStatus = 'HTTP下载：音频为空';
         return false;
       }
-      final wav = Uint8List.fromList(data);
-      await _player.setAudioSource(_BytesAudioSource(wav));
+      final bytes = Uint8List.fromList(data);
+      // edge 输出 MP3、其他引擎输出 WAV —— 按扩展名给对类型，否则解码失败
+      final isMp3 = audio.toLowerCase().endsWith('.mp3');
+      await _player.setAudioSource(
+        _BytesAudioSource(bytes, contentType: isMp3 ? 'audio/mpeg' : 'audio/wav'),
+      );
+      if (_gen != gen) return false;
       await _player.play();
-      lastStatus = 'HTTP下载播放完成';
-      return true;
+      final done = Completer<bool>();
+      final sub = _player.playerStateStream.listen((state) {
+        if (done.isCompleted) return;
+        if (state.processingState == ProcessingState.completed) {
+          done.complete(true);
+        } else if (state.processingState == ProcessingState.idle) {
+          done.complete(false);
+        }
+      });
+      try {
+        final ok = await done.future
+            .timeout(const Duration(minutes: 5), onTimeout: () => false);
+        final realOk = _gen == gen && ok;
+        lastStatus = realOk ? 'HTTP下载播放完成' : 'HTTP下载播放被打断';
+        return realOk;
+      } finally {
+        await sub.cancel();
+      }
     } catch (e) {
       lastStatus = 'HTTP下载播放失败：$e';
       debugPrint('[TTS] HTTP下载失败: $e');
@@ -424,10 +465,15 @@ class TtsService {
 }
 
 /// 已知长度的完整音频源（支持 Range 请求），喂给 just_audio/ExoPlayer。
+///
+/// [contentType] 默认 `audio/wav`（流式 PCM 分块打包的 WAV）；
+/// 下载服务器已合成文件时按扩展名传 `audio/mpeg`（edge 输出 MP3）等。
 class _BytesAudioSource extends StreamAudioSource {
-  _BytesAudioSource(this._bytes) : super(tag: 'tts-chunk');
+  _BytesAudioSource(this._bytes, {this.contentType = 'audio/wav'})
+      : super(tag: 'tts-chunk');
 
   final Uint8List _bytes;
+  final String contentType;
 
   @override
   Future<StreamAudioResponse> request([int? start, int? end]) async {
@@ -438,7 +484,7 @@ class _BytesAudioSource extends StreamAudioSource {
       sourceLength: _bytes.length,
       contentLength: e - s,
       offset: s,
-      contentType: 'audio/wav',
+      contentType: contentType,
       stream: Stream.value(_bytes.sublist(s, e)),
     );
   }

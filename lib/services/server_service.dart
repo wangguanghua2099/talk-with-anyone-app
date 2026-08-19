@@ -1,10 +1,12 @@
 // 服务器接口封装：连接测试、角色、会话、聊天
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
 import '../models/models.dart';
 import 'api_client.dart';
+import 'offline_cache.dart';
 
 class ServerService {
   ServerService({required this.baseUrl, required this.token}) {
@@ -18,19 +20,27 @@ class ServerService {
   /// 测试连接：GET /api/info（该接口豁免口令校验，可用于探测服务器是否存在）
   Future<ServerInfo> testConnection() async {
     final resp = await _dio.get('/api/info');
-    return ServerInfo.fromJson(resp.data as Map<String, dynamic>);
+    final info = ServerInfo.fromJson(resp.data as Map<String, dynamic>);
+    unawaited(OfflineCache.updateMeta(serverInfo: info));
+    return info;
   }
 
   Future<List<Character>> getCharacters() async {
     final resp = await _dio.get('/api/characters');
     final list = (resp.data as Map<String, dynamic>)['characters'] as List;
-    return list.map((e) => Character.fromJson(e as Map<String, dynamic>)).toList();
+    final chars = list
+        .map((e) => Character.fromJson(e as Map<String, dynamic>))
+        .toList();
+    unawaited(OfflineCache.updateMeta(characters: chars));
+    return chars;
   }
 
   /// 服务器全局配置（含 current_character_id、用户名、头像等）
   Future<Map<String, dynamic>> getConfig() async {
     final resp = await _dio.get('/api/config');
-    return resp.data as Map<String, dynamic>;
+    final data = resp.data as Map<String, dynamic>;
+    unawaited(OfflineCache.updateMeta(config: data));
+    return data;
   }
 
   /// 更新服务器全局配置（POST /api/config，未传字段保持不变）
@@ -64,7 +74,12 @@ class ServerService {
     final list = (data['conversations'] as List? ?? [])
         .map((e) => Conversation.fromJson(e as Map<String, dynamic>))
         .toList();
-    return (conversations: list, currentId: (data['current_id'] as String?) ?? '');
+    final currentId = (data['current_id'] as String?) ?? '';
+    unawaited(OfflineCache.updateMeta(
+      conversations: list,
+      currentConversationId: currentId,
+    ));
+    return (conversations: list, currentId: currentId);
   }
 
   /// 获取指定会话（含消息列表）。返回当前会话对象。
@@ -76,10 +91,12 @@ class ServerService {
     final messages = (data['messages'] as List? ?? [])
         .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
         .toList();
-    return (
-      conversation: Conversation.fromJson(data),
+    final conversation = Conversation.fromJson(data);
+    unawaited(OfflineCache.saveConversation(
+      conversation: conversation,
       messages: messages,
-    );
+    ));
+    return (conversation: conversation, messages: messages);
   }
 
   /// 切换当前会话（服务器端保存，之后 /api/chat 都会基于它）
@@ -93,6 +110,7 @@ class ServerService {
 
   Future<void> deleteConversation(String convId) async {
     await _dio.delete('/api/conversations/$convId');
+    unawaited(OfflineCache.deleteConversationCache(convId));
   }
 
   Future<void> renameConversation(String convId, String title) async {

@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../../i18n/app_strings.dart';
 import '../../models/models.dart';
+import '../../services/offline_cache.dart';
 import '../../state/app_state.dart';
 import '../../theme.dart';
 
@@ -39,17 +40,34 @@ class _DrawerConversationsState extends State<DrawerConversations> {
   }
 
   Future<({List<Conversation> conversations, String currentId})> _load() async {
-    final service = context.read<AppState>().service;
+    final app = context.read<AppState>();
+    final service = app.service;
     final q = _search.text.trim();
-    if (q.isEmpty) {
-      if (service == null) {
+    if (service == null) {
+      return (conversations: const <Conversation>[], currentId: '');
+    }
+    if (q.isNotEmpty) {
+      // 搜索需要服务器：离线时无结果
+      if (app.offline) {
         return (conversations: const <Conversation>[], currentId: '');
       }
-      return service.getConversations();
+      try {
+        return (conversations: await service.searchConversations(q), currentId: '');
+      } catch (_) {
+        return (conversations: const <Conversation>[], currentId: '');
+      }
     }
-    if (service == null) return (conversations: const <Conversation>[], currentId: '');
-    final list = await service.searchConversations(q);
-    return (conversations: list, currentId: '');
+    try {
+      final data = await service.getConversations();
+      app.setOnline();
+      return data;
+    } catch (_) {
+      // 断连：回退到上次同步的缓存列表（只读）
+      final cached = await OfflineCache.loadConversations();
+      final currentId = await OfflineCache.loadCurrentConversationId();
+      app.setOffline();
+      return (conversations: cached, currentId: currentId);
+    }
   }
 
   void _reload() {
@@ -58,10 +76,23 @@ class _DrawerConversationsState extends State<DrawerConversations> {
     });
   }
 
+  void _needNetwork() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.strs.networkRequired)),
+    );
+  }
+
   Future<void> _switchTo(String id) async {
     final app = context.read<AppState>();
     final service = app.service;
     if (service == null) return;
+    if (app.offline) {
+      // 离线：只浏览该会话缓存的聊天记录，不切换服务器当前会话
+      await app.setOfflineConv(id);
+      if (mounted) Navigator.pop(context);
+      return;
+    }
     await service.switchConversation(id);
     app.bumpConv();
     if (mounted) Navigator.pop(context);
@@ -96,12 +127,40 @@ class _DrawerConversationsState extends State<DrawerConversations> {
     controller.dispose();
     if (title == null || title.isEmpty) return;
     if (service == null) return;
+    if (app.offline) {
+      _needNetwork();
+      return;
+    }
     await service.renameConversation(conv.id, title);
     app.bumpConv();
   }
 
   Future<void> _delete(Conversation conv) async {
     final app = context.read<AppState>();
+    final strs = context.strs;
+    final title = conv.title.isEmpty ? strs.untitled : conv.title;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(strs.confirmDeleteConversation),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(strs.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(strs.delete),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    if (app.offline) {
+      _needNetwork();
+      return;
+    }
     final service = app.service;
     if (service == null) return;
     await service.deleteConversation(conv.id);

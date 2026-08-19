@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../i18n/app_strings.dart';
 import '../models/models.dart';
+import '../services/offline_cache.dart';
 import '../services/push_to_talk_service.dart';
 import '../services/read_aloud_service.dart';
 import '../services/server_service.dart';
@@ -95,37 +96,72 @@ class _ChatScreenState extends State<ChatScreen> {
         _userAvatar = (config['user_avatar'] as String?) ?? '';
         _ttsEnabled = (config['tts_read_ai'] as bool?) ?? true;
       });
-    } catch (_) {}
+    } catch (_) {
+      // 网络不可用：回退到缓存配置（用户名/头像/朗读开关）
+      final cached = await OfflineCache.loadConfig();
+      if (!mounted || cached == null) return;
+      setState(() {
+        final name = cached['user_name'] as String?;
+        _userName =
+            (name == null || name.isEmpty) ? context.strs.userBubble : name;
+        _userAvatar = (cached['user_avatar'] as String?) ?? '';
+        _ttsEnabled = (cached['tts_read_ai'] as bool?) ?? true;
+      });
+    }
   }
 
   Future<void> _loadHistory() async {
+    final app = context.read<AppState>();
     final service = _service;
     if (service == null) return;
-    try {
-      final convs = await service.getConversations();
-      if (convs.currentId.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _messages.clear();
-            _convTitle = '';
-            _syncMessageKeys();
-          });
+    String convId = '';
+    if (app.offline && app.offlineConvId.isNotEmpty) {
+      // 离线浏览场景：直接看缓存的指定会话
+      convId = app.offlineConvId;
+    } else {
+      try {
+        final convs = await service.getConversations();
+        app.setOnline();
+        convId = convs.currentId;
+        if (convId.isEmpty) {
+          if (mounted) {
+            setState(() {
+              _messages.clear();
+              _convTitle = '';
+              _syncMessageKeys();
+            });
+          }
+          return;
         }
+        final data = await service.getConversation(convId);
+        if (!mounted) return;
+        setState(() {
+          _messages
+            ..clear()
+            ..addAll(data.messages);
+          _convTitle = data.conversation.title;
+          _syncMessageKeys();
+        });
+        _scrollToBottom();
         return;
+      } catch (_) {
+        // 网络不可用：标记离线，回退到缓存的当前会话消息
+        app.setOffline();
+        if (convId.isEmpty) {
+          convId = await OfflineCache.loadCurrentConversationId();
+        }
       }
-      final data = await service.getConversation(convs.currentId);
-      if (!mounted) return;
-      setState(() {
-        _messages
-          ..clear()
-          ..addAll(data.messages);
-        _convTitle = data.conversation.title;
-        _syncMessageKeys();
-      });
-      _scrollToBottom();
-    } catch (_) {
-      // 加载失败不阻塞聊天
     }
+    final cached = await OfflineCache.loadConversation(convId);
+    if (!mounted) return;
+    setState(() {
+      _messages
+        ..clear()
+        ..addAll(cached?.messages ?? const <ChatMessage>[]);
+      _convTitle = cached?.conversation.title ?? '';
+      _syncMessageKeys();
+    });
+    if (cached != null) _scrollToBottom();
   }
 
   /// 按消息列表重建定位键（每次 setState 改消息内容后调用）
@@ -160,8 +196,15 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _send() async {
     final text = _input.text.trim();
     if (text.isEmpty || _sending) return;
-    final service = _service;
+    final app = context.read<AppState>();
+    final service = app.service;
     if (service == null) return;
+    if (app.offline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.strs.networkRequired)),
+      );
+      return;
+    }
     setState(() {
       _sending = true;
       _messages.add(ChatMessage(
@@ -513,6 +556,16 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
+          if (app.offline)
+            Container(
+              width: double.infinity,
+              color: const Color(0xFFFFF3CD),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Text(
+                strs.offlineModeBanner,
+                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+              ),
+            ),
           Expanded(
             child: _messages.isEmpty
                 ? Center(

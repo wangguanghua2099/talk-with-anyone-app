@@ -11,6 +11,13 @@ class ServerInfo {
         version: json['version'] ?? 'unknown',
         authRequired: json['auth_required'] == true,
       );
+
+  /// 序列化（离线缓存用）
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'version': version,
+        'auth_required': authRequired,
+      };
 }
 
 class Character {
@@ -41,6 +48,17 @@ class Character {
         aiAvatar: json['ai_avatar'] ?? '',
         engineVoices: (json['engine_voices'] as Map?)?.cast<String, dynamic>() ?? {},
       );
+
+  /// 序列化（离线缓存用）
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'display_name': displayName,
+        'ai_prompt': aiPrompt,
+        'ai_voice': aiVoice,
+        'ai_avatar': aiAvatar,
+        'engine_voices': engineVoices,
+      };
 }
 
 class Conversation {
@@ -65,6 +83,15 @@ class Conversation {
         updatedAt: json['updated_at'] ?? '',
         messageCount: json['message_count'] ?? 0,
       );
+
+  /// 序列化（离线缓存用）
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'created_at': createdAt,
+        'updated_at': updatedAt,
+        'message_count': messageCount,
+      };
 }
 
 class ChatMessage {
@@ -89,6 +116,15 @@ class ChatMessage {
         timestamp: json['timestamp'] ?? '',
         characterId: json['character_id'],
       );
+
+  /// 序列化（离线缓存用）
+  Map<String, dynamic> toJson() => {
+        'role': role,
+        'content': content,
+        'display_name': displayName,
+        'timestamp': timestamp,
+        'character_id': characterId,
+      };
 
   /// /api/chat 返回的 assistant 消息：timestamp 本地生成
   factory ChatMessage.assistant(String reply, String displayName, {DateTime? now}) {

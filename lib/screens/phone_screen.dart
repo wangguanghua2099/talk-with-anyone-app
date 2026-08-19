@@ -1,6 +1,7 @@
 // 电话页：全双工语音通话，进入即自动连接
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -67,7 +68,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
     required bool heard,
   }) {
     if (!active) return '';
-    if (!connected) return strs.connecting;
+    if (!connected) return strs.callConnected;
     return heard ? '' : strs.pleaseSpeak;
   }
 
@@ -110,24 +111,13 @@ class _PhoneScreenState extends State<PhoneScreen> {
           } else if (!active || !conn) {
             center = Center(
               child: Text(
-                strs.establishingCall,
+                strs.callConnected,
                 style: const TextStyle(color: AppTheme.textSecondary),
               ),
             );
           } else {
-            center = Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.mic, size: 36, color: AppTheme.primary),
-                  const SizedBox(height: 10),
-                  Text(
-                    strs.pleaseSpeak,
-                    style: const TextStyle(
-                        fontSize: 18, color: AppTheme.textSecondary),
-                  ),
-                ],
-              ),
+            center = const Center(
+              child: Icon(Icons.mic, size: 36, color: AppTheme.primary),
             );
           }
 
@@ -192,7 +182,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (voice != null)
+                if (kDebugMode && voice != null)
                   ValueListenableBuilder<int>(
                     valueListenable: voice.micBytesSent,
                     builder: (context, sent, _) {

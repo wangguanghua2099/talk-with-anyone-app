@@ -14,6 +14,12 @@ class CharactersScreen extends StatelessWidget {
 
   void _openSettings(BuildContext context, String? charId) {
     final app = context.read<AppState>();
+    if (charId == null && app.offline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.strs.networkRequired)),
+      );
+      return;
+    }
     final char =
         charId == null ? null : app.characters.where((c) => c.id == charId).firstOrNull;
     Navigator.push(
@@ -28,6 +34,12 @@ class CharactersScreen extends StatelessWidget {
   Future<void> _select(BuildContext context, String id, String name) async {
     final app = context.read<AppState>();
     final strs = context.strs;
+    if (app.offline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(strs.networkRequired)),
+      );
+      return;
+    }
     try {
       await app.selectCharacter(id);
     } catch (e) {
@@ -86,6 +98,13 @@ class CharactersScreen extends StatelessWidget {
       ),
     );
     if (confirmed != true) return;
+    if (app.offline) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.strs.networkRequired)),
+      );
+      return;
+    }
     try {
       await service.deleteCharacter(current.id);
       await app.loadCharacters();
