@@ -4,6 +4,17 @@
 *.pyc
 *.swp
 .DS_Store
+
+# Secrets / local config (never commit)
+*.pem
+*.key
+config.json
+*.local.json
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
 .atom/
 .build/
 .buildlog/

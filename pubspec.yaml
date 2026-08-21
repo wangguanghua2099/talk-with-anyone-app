@@ -1,7 +1,7 @@
 name: talk_with_anyone_app
 description: "Mobile client for Talk With Anyone - local-first voice chat."
 publish_to: 'none'
-version: 0.1.0+1
+version: 1.0.0+1
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
