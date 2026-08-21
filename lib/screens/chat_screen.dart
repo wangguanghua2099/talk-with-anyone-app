@@ -532,11 +532,6 @@ class _ChatScreenState extends State<ChatScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
-          IconButton(
-            tooltip: strs.stopReading,
-            icon: const Icon(Icons.stop_circle_outlined),
-            onPressed: reading || ttsBusy ? _stopSpeaking : null,
-          ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: InkWell(

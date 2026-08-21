@@ -21,6 +21,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
   VoiceService? _voice;
   StreamSubscription<VoiceEvent>? _sub;
   final List<VoiceEvent> _log = [];
+  final ScrollController _logScroll = ScrollController();
 
   @override
   void initState() {
@@ -32,6 +33,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
   void dispose() {
     _sub?.cancel();
     _voice?.dispose();
+    _logScroll.dispose();
     super.dispose();
   }
 
@@ -54,6 +56,15 @@ class _PhoneScreenState extends State<PhoneScreen> {
   void _onEvent(VoiceEvent event) {
     if (!mounted) return;
     setState(() => _log.add(event));
+    // 新字幕出现后自动滚到底部，满屏时不用手动翻
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_logScroll.hasClients) return;
+      _logScroll.animateTo(
+        _logScroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   void _hangUp() {
@@ -104,6 +115,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
           final Widget center;
           if (_log.isNotEmpty) {
             center = ListView.builder(
+              controller: _logScroll,
               padding: const EdgeInsets.all(12),
               itemCount: _log.length,
               itemBuilder: (context, i) => _eventTile(_log[i]),
