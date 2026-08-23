@@ -72,6 +72,10 @@ class ApiClient {
     return Uint8List.fromList(resp.data ?? const []);
   }
 
+  /// 规范化服务器地址：无协议头自动补 https://，去掉尾部斜杠。
+  /// 用户常只填 "IP:端口"，各处拼接前务必先用它处理。
+  static String normalize(String baseUrl) => _normalize(baseUrl);
+
   static String _normalize(String baseUrl) {
     var s = baseUrl.trim();
     if (s.isEmpty) return s;

@@ -2,6 +2,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
+import '../services/api_client.dart';
 import '../services/offline_cache.dart';
 import '../services/prefs.dart';
 import '../services/server_service.dart';
@@ -53,7 +54,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> initFromPrefs() async {
     final p = await Prefs.load();
-    baseUrl = p.baseUrl;
+    // 兼容历史数据：老版本可能存了不带协议头的地址（如 "IP:端口"）
+    baseUrl = p.baseUrl.isEmpty ? '' : ApiClient.normalize(p.baseUrl);
     token = p.token;
     _isEn = p.isEn;
     connected = baseUrl.isNotEmpty;
@@ -144,7 +146,7 @@ class AppState extends ChangeNotifier {
         throw const AuthException();
       }
     }
-    this.baseUrl = baseUrl.trim();
+    this.baseUrl = ApiClient.normalize(baseUrl.trim());
     this.token = token.trim();
     this.service = service;
     serverInfo = info;

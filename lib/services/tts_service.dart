@@ -213,7 +213,7 @@ class TtsService {
     });
 
     // 总超时兜底（服务器/引擎异常导致流不结束）
-    final timeoutMs = (text.length * 300).clamp(20000, 300000);
+    final timeoutMs = (text.length * 300).clamp(30000, 300000);
     timer = Timer(Duration(milliseconds: timeoutMs), () {
       if (finished) return;
       unawaited(finish(false, '流式播放超时'));
@@ -292,6 +292,54 @@ class TtsService {
     return ok;
   }
 
+  /// 把 dio 异常翻译成可读信息：带 HTTP 状态码和服务器返回的真实原因。
+  /// （默认 toString 只有 "DioException [unknown]: null"，无法定位问题）
+  static String _dioErrText(Object e) {
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      final data = e.response?.data;
+      var detail = '';
+      if (data is Map) {
+        detail = (data['message'] ?? data['error'] ?? '').toString();
+      } else if (data is String && data.isNotEmpty && data.length < 200) {
+        detail = data;
+      }
+      final prefix = code != null ? 'HTTP $code' : e.type.name;
+      if (detail.isEmpty && e.message != null) detail = e.message!;
+      // 底层异常（如 URL 拼接错误的 FormatException）往往才是真正原因
+      if (detail.isEmpty && e.error != null) detail = e.error.toString();
+      return detail.isEmpty ? prefix : '$prefix: $detail';
+    }
+    return e.toString();
+  }
+
+  /// 独立连接下载音频：每次新建 Dio（不复用可能已断的 keep-alive 连接，
+  /// WiFi/热点切换、高抖动网络下旧连接极易失效），失败自动重试。
+  /// 返回 null 表示失败或已被打断（lastStatus 里给出原因）。
+  Future<Uint8List?> _downloadBytes(String url, int gen) async {
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final dio = ApiClient.create(baseUrl: baseUrl, token: token)
+          ..options.receiveTimeout = const Duration(minutes: 3);
+        final resp = await dio.get<List<int>>(
+          url,
+          options: Options(responseType: ResponseType.bytes),
+        );
+        if (_gen != gen) return null; // 已被打断
+        final data = resp.data;
+        if (data != null && data.isNotEmpty) return Uint8List.fromList(data);
+        lastStatus = 'HTTP下载：音频为空';
+      } catch (e) {
+        lastStatus = 'HTTP下载失败(第$attempt次)：${_dioErrText(e)}';
+      }
+      if (attempt < 3) {
+        await Future<void>.delayed(Duration(milliseconds: 400 * attempt));
+        if (_gen != gen) return null;
+      }
+    }
+    return null;
+  }
+
   /// 播放服务器合成好的文件（引擎不支持流式时的 audio.done 带 path 场景，
   /// 如 edge 引擎返回 /static/current_audio.mp3）。
   ///
@@ -300,18 +348,13 @@ class TtsService {
   /// 否则 speak() 提前返回，连续朗读的下一句会立刻 stop() 把声音掐掉。
   Future<bool> _playDownloadedPath(String path, int gen) async {
     try {
-      final dio = ApiClient.create(baseUrl: baseUrl, token: token)
-        ..options.receiveTimeout = const Duration(minutes: 3);
+      // 相对路径交给 dio 按 baseUrl 解析（baseUrl 已规范化）；
+      // 不要用原始 baseUrl 手工拼绝对 URL —— 用户没填协议头时会拼出
+      // "IP:端口/api/..." 畸形地址，本地抛 FormatException 且请求发不出去。
       final url =
-          '$baseUrl/api/tts/download?filename=${Uri.encodeQueryComponent(path)}';
-      final resp = await dio.get<List<int>>(
-        url,
-        options: Options(responseType: ResponseType.bytes),
-      );
-      if (_gen != gen) return false; // 已被打断：放弃旧内容
-      final data = resp.data;
-      if (data == null || data.isEmpty) return false;
-      final bytes = Uint8List.fromList(data);
+          '/api/tts/download?filename=${Uri.encodeQueryComponent(path)}';
+      final bytes = await _downloadBytes(url, gen);
+      if (bytes == null || _gen != gen) return false;
       // edge 输出 MP3、其他引擎输出 WAV —— 按扩展名给对类型，否则解码失败
       final isMp3 = path.toLowerCase().endsWith('.mp3');
       await _player.setAudioSource(
@@ -338,6 +381,7 @@ class TtsService {
       }
     } catch (e) {
       debugPrint('[TTS] 下载路径播放失败: $e');
+      lastStatus = '下载服务器音频播放异常：${_dioErrText(e)}';
       return false;
     }
   }
@@ -346,13 +390,12 @@ class TtsService {
   /// [gen] 为本轮朗读代号：下载途中若被打断（代号变旧），立即放弃，
   /// 绝不把已被打断的旧内容重新合成播放出来。
   Future<bool> _tryDownloadPlay(String text, String? v, int gen) async {
-    final dio = ApiClient.create(baseUrl: baseUrl, token: token)
-      ..options.receiveTimeout = const Duration(minutes: 3);
     try {
-      final req = await dio.post(
+      final req = await ApiClient.create(baseUrl: baseUrl, token: token)
+          .post(
         '/api/tts/speak',
         data: {'text': text, if (v != null) 'voice': v},
-      );
+      ).timeout(const Duration(minutes: 3));
       if (_gen != gen) return false; // 已被打断：放弃旧内容
       final audio = (req.data as Map<String, dynamic>?)?['audio'] as String?;
       if (audio == null || audio.isEmpty) {
@@ -360,18 +403,9 @@ class TtsService {
         return false;
       }
       final url =
-          '$baseUrl/api/tts/download?filename=${Uri.encodeQueryComponent(audio)}';
-      final resp = await dio.get<List<int>>(
-        url,
-        options: Options(responseType: ResponseType.bytes),
-      );
-      if (_gen != gen) return false; // 已被打断：放弃旧内容
-      final data = resp.data;
-      if (data == null || data.isEmpty) {
-        lastStatus = 'HTTP下载：音频为空';
-        return false;
-      }
-      final bytes = Uint8List.fromList(data);
+          '/api/tts/download?filename=${Uri.encodeQueryComponent(audio)}';
+      final bytes = await _downloadBytes(url, gen);
+      if (bytes == null || _gen != gen) return false;
       // edge 输出 MP3、其他引擎输出 WAV —— 按扩展名给对类型，否则解码失败
       final isMp3 = audio.toLowerCase().endsWith('.mp3');
       await _player.setAudioSource(
@@ -398,7 +432,7 @@ class TtsService {
         await sub.cancel();
       }
     } catch (e) {
-      lastStatus = 'HTTP下载播放失败：$e';
+      lastStatus = 'HTTP下载播放失败：${_dioErrText(e)}';
       debugPrint('[TTS] HTTP下载失败: $e');
       return false;
     }
