@@ -12,6 +12,7 @@ The **Flutter mobile client** for Talk With Anyone, a local-first voice chat age
 - 💬 **Text chat**: multi-conversation management, streamed message rendering, stop-reading anytime.
 - 🗣️ **Multiple TTS engines**: `edge` (free online), `moss`, `qwen3`, `qwen3-clone` (voice cloning); progress bar plus audio/text export to public Downloads.
 - 🎭 **Character system**: switch, add, and delete custom AI characters (persona, avatar, dedicated voice).
+- 📚 **Knowledge base manager**: embedding-service status at a glance; multi-library management — create from txt upload/paste, incremental append, set active, delete; live build-progress polling and retrieval testing; one-tap knowledge-base toggle on the chat screen (when on, AI answers automatically cite library content).
 - 🌐 **Bilingual UI**: Chinese / English toggle.
 - 📡 **Offline read-only cache**: server is the source of truth; the phone keeps a metadata snapshot and per-conversation message files. Offline you can browse history, characters, and messages; **write operations are blocked with a "requires network" notice**.
 - 🔒 **Local-first**: server URL and access token are stored only in the device's `SharedPreferences` — never uploaded, never shipped with the repo.

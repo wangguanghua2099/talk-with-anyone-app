@@ -49,6 +49,9 @@ class _ChatScreenState extends State<ChatScreen> {
   /// TTS 朗读开关（服务器 config.tts_read_ai）：关时 AI 回复不自动朗读
   bool _ttsEnabled = true;
 
+  /// 知识库开关（服务器 config.rag_enabled）：开时 AI 回答参考本地知识库
+  bool _ragEnabled = false;
+
   /// 每条消息的滚动定位键（朗读高亮自动滚动用）
   final List<GlobalKey> _msgKeys = [];
 
@@ -95,6 +98,7 @@ class _ChatScreenState extends State<ChatScreen> {
             (name == null || name.isEmpty) ? context.strs.userBubble : name;
         _userAvatar = (config['user_avatar'] as String?) ?? '';
         _ttsEnabled = (config['tts_read_ai'] as bool?) ?? true;
+        _ragEnabled = (config['rag_enabled'] as bool?) ?? false;
       });
     } catch (_) {
       // 网络不可用：回退到缓存配置（用户名/头像/朗读开关）
@@ -106,6 +110,7 @@ class _ChatScreenState extends State<ChatScreen> {
             (name == null || name.isEmpty) ? context.strs.userBubble : name;
         _userAvatar = (cached['user_avatar'] as String?) ?? '';
         _ttsEnabled = (cached['tts_read_ai'] as bool?) ?? true;
+        _ragEnabled = (cached['rag_enabled'] as bool?) ?? false;
       });
     }
   }
@@ -282,6 +287,22 @@ class _ChatScreenState extends State<ChatScreen> {
     if (service == null) return;
     try {
       await service.updateConfig({'tts_read_ai': next});
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${context.strs.saveReadToggleFailed}$e')),
+      );
+    }
+  }
+
+  /// 知识库开关：切换 config.rag_enabled（服务器端保存）
+  Future<void> _toggleRag() async {
+    final next = !_ragEnabled;
+    setState(() => _ragEnabled = next);
+    final service = _service;
+    if (service == null) return;
+    try {
+      await service.updateConfig({'rag_enabled': next});
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -602,9 +623,11 @@ class _ChatScreenState extends State<ChatScreen> {
               phoneLabel: strs.phone,
               ttsEnabled: _ttsEnabled,
               stopEnabled: reading || ttsBusy,
+              ragEnabled: _ragEnabled,
               onPhoneTap: _openPhone,
               onToggleTts: _toggleTts,
               onStopTap: _stopSpeaking,
+              onToggleRag: _toggleRag,
             ),
           ),
           SafeArea(

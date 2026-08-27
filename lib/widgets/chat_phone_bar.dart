@@ -1,4 +1,4 @@
-// 聊天上方工具栏：电话 + 喇叭开关（开启/关闭 TTS 朗读） + 停止朗读按钮
+// 聊天上方工具栏：电话 + 喇叭开关（开启/关闭 TTS 朗读） + 停止朗读 + 知识库开关
 import 'package:flutter/material.dart';
 
 import '../i18n/app_strings.dart';
@@ -10,9 +10,11 @@ class ChatPhoneBar extends StatelessWidget {
     required this.phoneLabel,
     required this.ttsEnabled,
     required this.stopEnabled,
+    required this.ragEnabled,
     required this.onPhoneTap,
     required this.onToggleTts,
     required this.onStopTap,
+    required this.onToggleRag,
   });
 
   final String phoneLabel;
@@ -21,9 +23,13 @@ class ChatPhoneBar extends StatelessWidget {
   final bool ttsEnabled;
 
   final bool stopEnabled;
+
+  /// 知识库开关状态：true 时图标高亮主色
+  final bool ragEnabled;
   final VoidCallback onPhoneTap;
   final VoidCallback onToggleTts;
   final VoidCallback onStopTap;
+  final VoidCallback onToggleRag;
 
   @override
   Widget build(BuildContext context) {
@@ -62,6 +68,23 @@ class ChatPhoneBar extends StatelessWidget {
               foregroundColor: AppTheme.primary,
               visualDensity: VisualDensity.compact,
               disabledForegroundColor: AppTheme.textSecondary,
+            ),
+          ),
+          // 知识库开关：开启 = 书本高亮主色 + "知识库"文字，关闭 = 灰色
+          TextButton.icon(
+            onPressed: onToggleRag,
+            icon: Icon(
+              ragEnabled
+                  ? Icons.auto_stories
+                  : Icons.auto_stories_outlined,
+              size: 18,
+              color: ragEnabled ? AppTheme.primary : AppTheme.textSecondary,
+            ),
+            label: Text(strs.knowledgeBase),
+            style: TextButton.styleFrom(
+              foregroundColor:
+                  ragEnabled ? AppTheme.primary : AppTheme.textSecondary,
+              visualDensity: VisualDensity.compact,
             ),
           ),
         ],

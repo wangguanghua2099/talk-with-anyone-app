@@ -15,6 +15,18 @@ config.json
 *.jks
 *.keystore
 *.p12
+
+# Android signing
+key.properties
+**/android/key.properties
+
+# Per-platform Flutter generated dirs & CocoaPods
+**/ios/Flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+**/windows/flutter/ephemeral/
+**/ios/Pods/
+**/macos/Pods/
 .atom/
 .build/
 .buildlog/

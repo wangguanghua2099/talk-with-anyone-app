@@ -88,6 +88,38 @@ class AppStrings {
     required this.saveFailed,
     required this.deleteFailed,
     required this.stopReading,
+    required this.knowledgeBase,
+    required this.ragManager,
+    required this.ragToggleTitle,
+    required this.ragEmbedService,
+    required this.ragRunning,
+    required this.ragOffline,
+    required this.ragModel,
+    required this.ragDim,
+    required this.ragAuto,
+    required this.ragCreateKb,
+    required this.ragNameHint,
+    required this.ragPickTxt,
+    required this.ragPasteCreate,
+    required this.ragPasteHint,
+    required this.ragSearchTest,
+    required this.ragQueryHint,
+    required this.ragSearching,
+    required this.ragNoResults,
+    required this.ragLibList,
+    required this.ragEmptyList,
+    required this.ragChunkUnit,
+    required this.ragBuilding,
+    required this.ragBuildFailed,
+    required this.ragSetActive,
+    required this.ragActiveTag,
+    required this.ragAppend,
+    required this.ragDeleteLib,
+    required this.ragConfirmDelete,
+    required this.ragCreateOk,
+    required this.ragScore,
+    required this.ragChapter,
+    required this.ragSource,
     required this.noSpeechDetected,
     required this.webSaveUnsupported,
     required this.savedPathPrefix,
@@ -288,6 +320,38 @@ class AppStrings {
   final String saveFailed;
   final String deleteFailed;
   final String stopReading;
+  final String knowledgeBase;
+  final String ragManager;
+  final String ragToggleTitle;
+  final String ragEmbedService;
+  final String ragRunning;
+  final String ragOffline;
+  final String ragModel;
+  final String ragDim;
+  final String ragAuto;
+  final String ragCreateKb;
+  final String ragNameHint;
+  final String ragPickTxt;
+  final String ragPasteCreate;
+  final String ragPasteHint;
+  final String ragSearchTest;
+  final String ragQueryHint;
+  final String ragSearching;
+  final String ragNoResults;
+  final String ragLibList;
+  final String ragEmptyList;
+  final String ragChunkUnit;
+  final String ragBuilding;
+  final String ragBuildFailed;
+  final String ragSetActive;
+  final String ragActiveTag;
+  final String ragAppend;
+  final String ragDeleteLib;
+  final String ragConfirmDelete;
+  final String ragCreateOk;
+  final String ragScore;
+  final String ragChapter;
+  final String ragSource;
   final String noSpeechDetected;
   final String webSaveUnsupported;
   final String savedPathPrefix;
@@ -515,6 +579,38 @@ class AppStrings {
     saveFailed: '保存失败：',
     deleteFailed: '删除失败：',
     stopReading: '停止朗读',
+    knowledgeBase: '知识库',
+    ragManager: '知识库管理',
+    ragToggleTitle: '开启后AI回答将参考本地知识库',
+    ragEmbedService: '嵌入服务',
+    ragRunning: '运行中',
+    ragOffline: '未连接',
+    ragModel: '模型',
+    ragDim: '维度',
+    ragAuto: '自动',
+    ragCreateKb: '新建知识库',
+    ragNameHint: '库名称（默认取文件名）',
+    ragPickTxt: '选择txt文件',
+    ragPasteCreate: '粘贴创建',
+    ragPasteHint: '粘贴文本内容…',
+    ragSearchTest: '检索测试',
+    ragQueryHint: '输入问题测试检索…',
+    ragSearching: '搜索中…',
+    ragNoResults: '无匹配结果',
+    ragLibList: '知识库列表',
+    ragEmptyList: '暂无知识库，先上传 txt 创建',
+    ragChunkUnit: '块',
+    ragBuilding: '构建中',
+    ragBuildFailed: '构建失败',
+    ragSetActive: '设为聊天用',
+    ragActiveTag: '当前激活',
+    ragAppend: '追加',
+    ragDeleteLib: '删除',
+    ragConfirmDelete: '确定删除该知识库？不可恢复',
+    ragCreateOk: '创建成功，正在构建',
+    ragScore: '得分',
+    ragChapter: '章节',
+    ragSource: '来源',
     noSpeechDetected: '未识别到语音内容',
     webSaveUnsupported: '网页调试版不支持保存到手机，请用手机 App 使用该功能',
     savedPathPrefix: '已保存：',
@@ -701,6 +797,38 @@ class AppStrings {
     saveFailed: 'Save failed: ',
     deleteFailed: 'Delete failed: ',
     stopReading: 'Stop reading',
+    knowledgeBase: 'Knowledge Base',
+    ragManager: 'Knowledge Base Manager',
+    ragToggleTitle: 'AI answers will reference the local knowledge base',
+    ragEmbedService: 'Embedding service',
+    ragRunning: 'Running',
+    ragOffline: 'Offline',
+    ragModel: 'Model',
+    ragDim: 'Dim',
+    ragAuto: 'Auto',
+    ragCreateKb: 'New Knowledge Base',
+    ragNameHint: 'Library name (default from file name)',
+    ragPickTxt: 'Pick .txt files',
+    ragPasteCreate: 'Paste & create',
+    ragPasteHint: 'Paste text content…',
+    ragSearchTest: 'Retrieval Test',
+    ragQueryHint: 'Type a question to test retrieval…',
+    ragSearching: 'Searching…',
+    ragNoResults: 'No matches',
+    ragLibList: 'Libraries',
+    ragEmptyList: 'No libraries yet, upload a .txt to create one',
+    ragChunkUnit: 'chunks',
+    ragBuilding: 'Building',
+    ragBuildFailed: 'Build failed',
+    ragSetActive: 'Use for chat',
+    ragActiveTag: 'Active',
+    ragAppend: 'Append',
+    ragDeleteLib: 'Delete',
+    ragConfirmDelete: 'Delete this library? This cannot be undone',
+    ragCreateOk: 'Created, building started',
+    ragScore: 'score',
+    ragChapter: 'Chapter',
+    ragSource: 'Source',
     noSpeechDetected: 'No speech detected',
     webSaveUnsupported:
         'Saving to phone is not supported in the web debug version. Please use the mobile app.',

@@ -260,4 +260,69 @@ class ServerService {
         .toList();
     return models;
   }
+
+  /// RAG 总状态（GET /api/rag/status）：配置 + 库列表 + 构建进度 + 嵌入服务
+  Future<Map<String, dynamic>> getRagStatus() async {
+    final resp = await _dio.get('/api/rag/status');
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// 创建知识库并上传 txt（POST /api/rag/libraries，multipart）
+  Future<String> createRagLibrary({
+    required String name,
+    required String fileName,
+    required List<int> fileBytes,
+  }) async {
+    final formData = FormData.fromMap({
+      'name': name,
+      'files': MultipartFile.fromBytes(fileBytes, filename: fileName),
+    });
+    final resp = await _dio.post(
+      '/api/rag/libraries',
+      data: formData,
+      options: Options(contentType: 'multipart/form-data'),
+    );
+    return ((resp.data as Map<String, dynamic>)['kb_id'])?.toString() ?? '';
+  }
+
+  /// 向已有知识库追加 txt（POST /api/rag/libraries/{id}/documents）
+  Future<void> appendRagDocuments({
+    required String kbId,
+    required String fileName,
+    required List<int> fileBytes,
+  }) async {
+    final formData = FormData.fromMap({
+      'files': MultipartFile.fromBytes(fileBytes, filename: fileName),
+    });
+    await _dio.post(
+      '/api/rag/libraries/$kbId/documents',
+      data: formData,
+      options: Options(contentType: 'multipart/form-data'),
+    );
+  }
+
+  /// 激活知识库（POST /api/rag/libraries/{id}/activate）
+  Future<void> activateRagLibrary(String kbId) async {
+    await _dio.post('/api/rag/libraries/$kbId/activate', data: {});
+  }
+
+  /// 删除知识库（DELETE /api/rag/libraries/{id}）
+  Future<void> deleteRagLibrary(String kbId) async {
+    await _dio.delete('/api/rag/libraries/$kbId');
+  }
+
+  /// 知识库检索测试（POST /api/rag/query）
+  Future<List<Map<String, dynamic>>> ragQuery(
+    String query, {
+    String? kbId,
+    int topK = 3,
+  }) async {
+    final resp = await _dio.post('/api/rag/query', data: {
+      'query': query,
+      'top_k': topK,
+      if (kbId != null && kbId.isNotEmpty) 'kb_id': kbId,
+    });
+    final hits = ((resp.data as Map<String, dynamic>)['hits'] as List? ?? []);
+    return hits.cast<Map<String, dynamic>>();
+  }
 }
