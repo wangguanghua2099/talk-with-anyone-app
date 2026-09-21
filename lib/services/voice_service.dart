@@ -1,13 +1,25 @@
-// 全双工语音电话模式：录音 PCM16 → /ws/voice → 服务器识别并回复 → 手机本地 TTS 播放
+// 全双工语音电话模式：录音 PCM16 → /ws/voice → 服务器识别并流式回复
 //
-// 协议（见服务器 routes/voice.py）：
+// 协议（见服务器 routes/voice.py，新版流式）：
 //   连接后服务器发 {"type":"server.ready","session_id":...,"asr_engine":...}
 //   客户端发    {"type":"session.start","mode":"chat"}          → 收到 {"type":"session.ready",...}
 //   客户端持续发送二进制 PCM16（16k/单声道）
 //   服务器按 VAD 识别：{"type":"vad.speaking","speaking":bool}
 //                     {"type":"asr.result","text":"...","is_final":true}
-//                     {"type":"assistant.completed","text":"..."}
+//   回复流式下发（边生成边发）：
+//                     {"type":"assistant.delta","text":"增量"}     文字 token 级直推
+//                     {"type":"audio.start","sample_rate":24000}   流式音频开始
+//                     {"type":"audio.chunk","data":"base64 PCM16"} 音频块（边合成边推）
+//                     {"type":"audio.done"}                        本轮音频发送完毕
+//                     {"type":"audio.file","path":"/static/..."}   无流式引擎的逐句文件
+//                     {"type":"assistant.completed","text":"全文"}
 //   客户端发    {"type":"interrupt"} 打断；{"type":"session.stop"} 结束
+//               {"type":"client_stats","llm_first_token_to_audio_ms":...} 延迟上报
+//
+// 文字与语音解耦：delta 立刻上抛给界面打字显示，不等 TTS；音频块由
+// VoiceStreamPlayer 边收边播（首包到达即出声）。只有整轮没收到过任何
+// 音频（服务器关了朗读/合成失败/旧后端）时，才回退到拿到全文后再
+// 请求 TTS 合成播放（旧行为）。
 import 'dart:async';
 import 'dart:convert';
 
@@ -17,6 +29,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'api_client.dart';
 import 'tts_service.dart';
+import 'voice_stream_player.dart';
 
 /// 会话中产生的展示事件
 sealed class VoiceEvent {
@@ -28,8 +41,21 @@ class VoiceUserText extends VoiceEvent {
   final String text;
 }
 
+/// 回复文字增量（流式打字显示用，逐条上抛）
+class VoiceAssistantDelta extends VoiceEvent {
+  const VoiceAssistantDelta(this.text);
+  final String text;
+}
+
+/// 回复正常完成：全文（替换掉正在打字的气泡内容）
 class VoiceAssistantText extends VoiceEvent {
   const VoiceAssistantText(this.text);
+  final String text;
+}
+
+/// 回复被打断/出错：已收到的部分文字（立即收尾显示）
+class VoiceAssistantPartial extends VoiceEvent {
+  const VoiceAssistantPartial(this.text);
   final String text;
 }
 
@@ -46,10 +72,23 @@ class VoiceService {
 
   final AudioRecorder _recorder = AudioRecorder();
   TtsService? _tts;
+  VoiceStreamPlayer? _streamPlayer;
   WebSocketChannel? _channel;
   StreamSubscription<Uint8List>? _micSub;
   bool _active = false;
   bool _micMuted = false;
+
+  /// 服务器朗读开关（config.tts_read_ai）：决定 completed 后要不要兜底朗读
+  bool _ttsReadAi = true;
+
+  /// 当前回复轮状态：是否进行中 / 已收文字 / 已收音频 / 是否已收尾
+  bool _roundActive = false;
+  bool _roundFinalized = false;
+  bool _receivedAudio = false;
+  String _assistantBuf = '';
+
+  /// LLM 首个文字增量时刻（出声延迟统计用，每轮一次）
+  DateTime? _llmFirstTokenAt;
 
   final _events = StreamController<VoiceEvent>.broadcast();
   final ValueNotifier<bool> speaking = ValueNotifier(false);
@@ -89,7 +128,7 @@ class VoiceService {
     ),
   );
 
-  /// 展示事件流（user 文本 / assistant 文本 / 错误）
+  /// 展示事件流（user 文本 / assistant 流式与最终文本 / 错误）
   Stream<VoiceEvent> get events => _events.stream;
 
   bool get isMicMuted => _micMuted;
@@ -108,6 +147,13 @@ class VoiceService {
       return;
     }
     _tts = TtsService(baseUrl: baseUrl, token: token, inCallMode: true);
+    _streamPlayer = VoiceStreamPlayer(baseUrl: baseUrl, token: token)
+      ..onFirstAudio = _onFirstAudio;
+    _streamPlayer!.playing.addListener(() {
+      // 流式音频路径的"AI 正在说话"提示；兜底 _speak 路径自行维护该状态
+      if (!_speakBusy) ttsPlaying.value = _streamPlayer!.playing.value;
+    });
+    unawaited(_loadTtsEnabled());
 
     final uri = ApiClient.webSocketUri(baseUrl, '/ws/voice', token: token);
     final channel = ApiClient.connectWs(uri);
@@ -116,6 +162,7 @@ class VoiceService {
     active.value = true;
     connected.value = false;
     heardUser.value = false;
+    _resetRound();
 
     channel.stream.listen(
       (data) => _handleServerMessage(data),
@@ -140,26 +187,14 @@ class VoiceService {
     });
   }
 
-  /// 停止通话（结束录音 + 关闭连接 + 停止播放）
-  Future<void> stop() async {
-    if (!_active) return;
-    _active = false;
-    active.value = false;
-    connected.value = false;
-    await _micSub?.cancel();
-    _micSub = null;
-    if (await _recorder.isRecording()) {
-      await _recorder.stop();
-    }
-    if (_channel != null) {
-      try {
-        _channel!.sink.add(jsonEncode({'type': 'session.stop'}));
-      } catch (_) {}
-      await _channel!.sink.close();
-    }
-    _channel = null;
-    await _tts?.stop();
-    _onConnectionClosed();
+  /// 读取服务器朗读开关（失败按开启处理，保持旧的"总是朗读"行为）
+  Future<void> _loadTtsEnabled() async {
+    try {
+      final dio = ApiClient.create(baseUrl: baseUrl, token: token);
+      final resp = await dio.get<Map<String, dynamic>>('/api/config');
+      final v = resp.data?['tts_read_ai'];
+      if (v is bool) _ttsReadAi = v;
+    } catch (_) {}
   }
 
   void _handleServerMessage(dynamic data) {
@@ -178,36 +213,108 @@ class VoiceService {
         speaking.value = sp;
         if (sp) {
           heardUser.value = true;
-          // barge-in（豆包式打断）：用户一开口，既停本地 TTS 播放，
-          // 也通知服务器取消上一轮未完成的回复（停止 LLM/合成），
+          // barge-in（豆包式打断）：用户一开口，先收尾正在打字的回复，
+          // 停掉本地播放，再通知服务器取消上一轮未完成的生成，
           // 保证接下来只合成和播放新回复。依赖全双工音源的回声消除。
+          _finalizePartialRound();
           unawaited(interrupt());
         }
       case 'asr.result':
         final text = (msg['text'] ?? '').toString();
         if (text.trim().isNotEmpty) {
           heardUser.value = true;
+          // 新一轮回复开始（防御：上一轮没收尾的先收尾）
+          _finalizePartialRound();
+          _resetRound();
           _events.add(VoiceUserText(text));
         }
-      case 'assistant.completed':
+      case 'assistant.delta':
+        if (_roundFinalized) return; // 已被打断收尾，丢弃迟到内容
         final text = (msg['text'] ?? '').toString();
+        if (text.isEmpty) return;
+        _roundActive = true;
+        _assistantBuf += text;
+        _llmFirstTokenAt ??= DateTime.now();
+        _events.add(VoiceAssistantDelta(text));
+      case 'audio.start':
+        _receivedAudio = true;
+        final sr = (msg['sample_rate'] as num?)?.toInt() ?? 24000;
+        _streamPlayer?.start(sr);
+      case 'audio.chunk':
+        final b64 = msg['data'] as String?;
+        if (b64 != null) _streamPlayer?.pushChunk(b64);
+      case 'audio.done':
+        _streamPlayer?.markDone();
+      case 'audio.file':
+        _receivedAudio = true;
+        final path = (msg['path'] ?? '').toString();
+        if (path.isNotEmpty) unawaited(_streamPlayer?.playFile(path));
+      case 'assistant.completed':
+        if (_roundFinalized) return; // 本轮已被打断，丢弃迟到结果
+        final text = (msg['text'] ?? '').toString();
+        _roundFinalized = true;
+        _roundActive = false;
         if (text.trim().isNotEmpty) {
           _events.add(VoiceAssistantText(text));
-          _speak(text);
+          // 新后端音频已随句子推送播放；整轮没收到过音频才走
+          // "全文→TTS 合成"的兜底（旧后端/服务器朗读关闭/合成失败）
+          if (!_receivedAudio && _ttsReadAi) {
+            unawaited(_speak(text));
+          }
         }
       case 'assistant.error':
+        _finalizePartialRound();
         _events.add(VoiceError((msg['message'] ?? '回复失败').toString()));
+      case 'interrupt.ack':
+        // 后端已确认取消生成；播放已停，部分文字由 vad 触发时收尾
+        unawaited(_streamPlayer?.stop());
       case 'error':
         _events.add(VoiceError((msg['message'] ?? '服务器错误').toString()));
     }
   }
 
+  /// 收尾当前轮（打断/出错）：已缓冲的文字作为部分内容上抛，不再等 completed
+  void _finalizePartialRound() {
+    if (!_roundActive || _roundFinalized) return;
+    _roundFinalized = true;
+    _roundActive = false;
+    unawaited(_streamPlayer?.stop());
+    final partial = _assistantBuf.trim();
+    if (partial.isNotEmpty) {
+      _events.add(VoiceAssistantPartial(partial));
+    }
+  }
+
+  void _resetRound() {
+    _roundActive = false;
+    _roundFinalized = false;
+    _receivedAudio = false;
+    _assistantBuf = '';
+    _llmFirstTokenAt = null;
+  }
+
+  /// 出声计时：AI 语音第一个音频块实际开始播放时，
+  /// 把"LLM 首个文字增量 → 出声"的间隔回传服务器（后台日志展示）
+  void _onFirstAudio() {
+    final t0 = _llmFirstTokenAt;
+    _llmFirstTokenAt = null;
+    if (t0 == null) return;
+    final lat = DateTime.now().difference(t0).inMilliseconds;
+    debugPrint('[Voice] LLM首token→出声: $lat ms');
+    try {
+      _channel?.sink
+          .add(jsonEncode({'type': 'client_stats', 'llm_first_token_to_audio_ms': lat}));
+    } catch (_) {}
+  }
+
   /// _speak 轮次序号：被打断的旧 _speak 结束时不能把新回复的
   /// ttsPlaying 状态误清为 false
   int _speakSeq = 0;
+  bool _speakBusy = false;
 
   Future<void> _speak(String text) async {
     final seq = ++_speakSeq;
+    _speakBusy = true;
     ttsPlaying.value = true;
     try {
       await _tts?.speak(text);
@@ -223,11 +330,12 @@ class VoiceService {
         }
       } catch (_) {}
       if (_speakSeq == seq) {
+        _speakBusy = false;
         final status = _tts?.lastStatus ?? '';
         if (status.contains('失败')) {
           _events.add(VoiceError('语音诊断：$status'));
         }
-        ttsPlaying.value = false;
+        ttsPlaying.value = _streamPlayer?.playing.value ?? false;
       }
     }
   }
@@ -237,6 +345,9 @@ class VoiceService {
     if (_channel == null) return;
     try {
       _channel!.sink.add(jsonEncode({'type': 'interrupt'}));
+    } catch (_) {}
+    try {
+      await _streamPlayer?.stop();
     } catch (_) {}
     try {
       await _tts?.stop();
@@ -257,8 +368,33 @@ class VoiceService {
     connected.value = false;
   }
 
+  /// 停止通话（结束录音 + 关闭连接 + 停止播放）
+  Future<void> stop() async {
+    if (!_active) return;
+    _active = false;
+    active.value = false;
+    connected.value = false;
+    _finalizePartialRound();
+    await _micSub?.cancel();
+    _micSub = null;
+    if (await _recorder.isRecording()) {
+      await _recorder.stop();
+    }
+    if (_channel != null) {
+      try {
+        _channel!.sink.add(jsonEncode({'type': 'session.stop'}));
+      } catch (_) {}
+      await _channel!.sink.close();
+    }
+    _channel = null;
+    await _streamPlayer?.stop();
+    await _tts?.stop();
+    _onConnectionClosed();
+  }
+
   Future<void> dispose() async {
     await stop();
+    await _streamPlayer?.dispose();
     await _events.close();
     await _recorder.dispose();
   }

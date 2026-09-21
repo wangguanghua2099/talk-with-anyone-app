@@ -68,12 +68,25 @@ class Conversation {
   final String updatedAt;
   final int messageCount;
 
+  /// 搜索结果专有（/api/conversations/search）：
+  /// match_type: "title"=仅标题命中, "content"=消息内容命中
+  final String matchType;
+
+  /// 命中消息的关键词片段（前后各30字，最多3条，含 "..." 边界标记）
+  final List<String> snippets;
+
+  /// 与 snippets 一一对应的消息下标（会话消息列表内，0-based，用于跳转定位）
+  final List<int> snippetIndices;
+
   Conversation({
     required this.id,
     required this.title,
     required this.createdAt,
     required this.updatedAt,
     required this.messageCount,
+    this.matchType = '',
+    this.snippets = const [],
+    this.snippetIndices = const [],
   });
 
   factory Conversation.fromJson(Map<String, dynamic> json) => Conversation(
@@ -82,6 +95,12 @@ class Conversation {
         createdAt: json['created_at'] ?? '',
         updatedAt: json['updated_at'] ?? '',
         messageCount: json['message_count'] ?? 0,
+        matchType: json['match_type'] ?? '',
+        snippets:
+            (json['snippets'] as List? ?? []).map((e) => e.toString()).toList(),
+        snippetIndices: (json['snippet_indices'] as List? ?? [])
+            .map((e) => (e as num).toInt())
+            .toList(),
       );
 
   /// 序列化（离线缓存用）

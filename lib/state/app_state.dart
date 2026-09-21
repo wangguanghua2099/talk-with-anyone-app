@@ -52,6 +52,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 搜索结果跳转：聊天页下次加载完会话后滚动并高亮该消息（然后清零）。
+  /// 值为消息在会话消息列表里的下标（0-based，服务器 snippet_indices 给出）
+  int? pendingJumpMessageIndex;
+  void requestJumpToMessage(int index) {
+    pendingJumpMessageIndex = index;
+    bumpConv();
+  }
+
   Future<void> initFromPrefs() async {
     final p = await Prefs.load();
     // 兼容历史数据：老版本可能存了不带协议头的地址（如 "IP:端口"）

@@ -98,6 +98,58 @@ class _DrawerConversationsState extends State<DrawerConversations> {
     if (mounted) Navigator.pop(context);
   }
 
+  /// 搜索跳转（DeepSeek 式）：切换到该会话并定位到命中的消息。
+  /// 消息下标由服务器 snippet_indices 给出（会话消息列表内 0-based）
+  Future<void> _jumpTo(String id, int msgIndex) async {
+    final app = context.read<AppState>();
+    final service = app.service;
+    if (service == null) return;
+    if (app.offline) {
+      await app.setOfflineConv(id);
+      app.requestJumpToMessage(msgIndex);
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+    try {
+      await service.switchConversation(id);
+    } catch (_) {
+      _needNetwork();
+      return;
+    }
+    app.requestJumpToMessage(msgIndex);
+    if (mounted) Navigator.pop(context);
+  }
+
+  /// 关键词高亮片段：命中部分用主题色加粗（对应网页版 <mark> 高亮）
+  List<InlineSpan> _highlight(String text, String keyword) {
+    final spans = <InlineSpan>[];
+    final kw = keyword.trim();
+    if (kw.isEmpty) {
+      spans.add(TextSpan(text: text));
+      return spans;
+    }
+    final lower = text.toLowerCase();
+    final kwLower = kw.toLowerCase();
+    var start = 0;
+    while (true) {
+      final i = lower.indexOf(kwLower, start);
+      if (i < 0) {
+        if (start < text.length) spans.add(TextSpan(text: text.substring(start)));
+        break;
+      }
+      if (i > start) spans.add(TextSpan(text: text.substring(start, i)));
+      spans.add(TextSpan(
+        text: text.substring(i, i + kw.length),
+        style: const TextStyle(
+          color: AppTheme.primary,
+          fontWeight: FontWeight.bold,
+        ),
+      ));
+      start = i + kw.length;
+    }
+    return spans;
+  }
+
   Future<void> _rename(Conversation conv) async {
     final app = context.read<AppState>();
     final service = app.service;
@@ -226,12 +278,22 @@ class _DrawerConversationsState extends State<DrawerConversations> {
     );
   }
 
-  Widget _convTile(Conversation conv, bool isCurrent) {
+  Widget _convTile(Conversation conv, bool isCurrent, {bool searching = false}) {
     final strs = context.strs;
     final app = context.read<AppState>();
     final isEn = app.isEn;
     final ts = DateTime.tryParse(
         conv.updatedAt.isNotEmpty ? conv.updatedAt : conv.createdAt);
+    // 搜索结果：显示该会话里第一条含关键词的消息片段（DeepSeek 式），
+    // 点击直接跳到那条消息的位置
+    final hasSnippet = searching && conv.snippets.isNotEmpty;
+    final jumpIdx = hasSnippet && conv.snippetIndices.isNotEmpty
+        ? conv.snippetIndices.first
+        : -1;
+    const subtitleStyle = TextStyle(
+      fontSize: 12,
+      color: AppTheme.textSecondary,
+    );
     return ListTile(
       dense: true,
       leading: Icon(
@@ -244,8 +306,42 @@ class _DrawerConversationsState extends State<DrawerConversations> {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Text(
-        '${ts == null ? '' : _timeLabel(ts, isEn)}  ·  ${conv.messageCount} ${strs.messageCount}',
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${ts == null ? '' : _timeLabel(ts, isEn)}  ·  ${conv.messageCount} ${strs.messageCount}',
+          ),
+          if (hasSnippet)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Icon(
+                      Icons.subdirectory_arrow_right,
+                      size: 13,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        children: _highlight(conv.snippets.first, _search.text),
+                        style: subtitleStyle.copyWith(fontSize: 12),
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -264,7 +360,8 @@ class _DrawerConversationsState extends State<DrawerConversations> {
           ),
         ],
       ),
-      onTap: () => _switchTo(conv.id),
+      onTap: () =>
+          jumpIdx >= 0 ? _jumpTo(conv.id, jumpIdx) : _switchTo(conv.id),
     );
   }
 
@@ -339,7 +436,11 @@ class _DrawerConversationsState extends State<DrawerConversations> {
                   final row = rows[r];
                   if (row is String) return _monthHeader(row);
                   final conv = row as Conversation;
-                  return _convTile(conv, conv.id == currentId);
+                  return _convTile(
+                    conv,
+                    conv.id == currentId,
+                    searching: _search.text.trim().isNotEmpty,
+                  );
                 },
               );
             },

@@ -172,17 +172,17 @@ class TtsService {
       if (finished) return;
       final pcm = base64Decode(b64);
       if (pcm.isEmpty) return;
-      final wav = _wavFromPcm16(pcm, sampleRate);
+      final wav = pcm16ToWav(pcm, sampleRate);
       chunkCount++;
       try {
         if (!playStarted) {
           playStarted = true;
           debugPrint('[TTS] 首个分块到达，开始流式播放');
-          await _player.setAudioSources([_BytesAudioSource(wav)]);
+          await _player.setAudioSources([BytesAudioSource(wav)]);
           if (finished) return;
           unawaited(_player.play());
         } else {
-          await _player.addAudioSource(_BytesAudioSource(wav));
+          await _player.addAudioSource(BytesAudioSource(wav));
           if (finished) return;
           // 欠载自愈：播放已追上进度（completed），新块到达则续播
           if (_player.processingState == ProcessingState.completed) {
@@ -358,7 +358,7 @@ class TtsService {
       // edge 输出 MP3、其他引擎输出 WAV —— 按扩展名给对类型，否则解码失败
       final isMp3 = path.toLowerCase().endsWith('.mp3');
       await _player.setAudioSource(
-        _BytesAudioSource(bytes, contentType: isMp3 ? 'audio/mpeg' : 'audio/wav'),
+        BytesAudioSource(bytes, contentType: isMp3 ? 'audio/mpeg' : 'audio/wav'),
       );
       if (_gen != gen) return false;
       await _player.play();
@@ -409,7 +409,7 @@ class TtsService {
       // edge 输出 MP3、其他引擎输出 WAV —— 按扩展名给对类型，否则解码失败
       final isMp3 = audio.toLowerCase().endsWith('.mp3');
       await _player.setAudioSource(
-        _BytesAudioSource(bytes, contentType: isMp3 ? 'audio/mpeg' : 'audio/wav'),
+        BytesAudioSource(bytes, contentType: isMp3 ? 'audio/mpeg' : 'audio/wav'),
       );
       if (_gen != gen) return false;
       await _player.play();
@@ -471,8 +471,8 @@ class TtsService {
     await _player.dispose();
   }
 
-  /// PCM16（单声道）打包成 WAV
-  static Uint8List _wavFromPcm16(Uint8List pcm, int sampleRate) {
+  /// PCM16（单声道）打包成 WAV（电话模式流式播放共用）
+  static Uint8List pcm16ToWav(Uint8List pcm, int sampleRate) {
     final dataSize = pcm.length;
     final buffer = BytesBuilder();
     void writeStr(String s) => buffer.add(utf8.encode(s));
@@ -502,8 +502,8 @@ class TtsService {
 ///
 /// [contentType] 默认 `audio/wav`（流式 PCM 分块打包的 WAV）；
 /// 下载服务器已合成文件时按扩展名传 `audio/mpeg`（edge 输出 MP3）等。
-class _BytesAudioSource extends StreamAudioSource {
-  _BytesAudioSource(this._bytes, {this.contentType = 'audio/wav'})
+class BytesAudioSource extends StreamAudioSource {
+  BytesAudioSource(this._bytes, {this.contentType = 'audio/wav'})
       : super(tag: 'tts-chunk');
 
   final Uint8List _bytes;

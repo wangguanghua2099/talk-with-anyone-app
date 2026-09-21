@@ -1,4 +1,6 @@
-// 电话页：全双工语音通话，进入即自动连接
+// 电话页：全双工语音通话，进入即自动连接。
+// 回复字幕与网页版一致：assistant.delta 逐字打字显示，
+// completed 后放完动画替换为全文；被打断时立即定格已收到的部分。
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +11,7 @@ import '../i18n/app_strings.dart';
 import '../services/voice_service.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
+import '../widgets/typewriter_text.dart';
 
 class PhoneScreen extends StatefulWidget {
   const PhoneScreen({super.key});
@@ -17,10 +20,39 @@ class PhoneScreen extends StatefulWidget {
   State<PhoneScreen> createState() => _PhoneScreenState();
 }
 
+/// 字幕条目：用户发言 / AI 回复 / 错误
+sealed class _Entry {
+  const _Entry();
+}
+
+class _UserEntry extends _Entry {
+  const _UserEntry(this.text);
+  final String text;
+}
+
+class _AssistantEntry extends _Entry {
+  _AssistantEntry(String initial, {this.streaming = false, this.animating = true})
+      : text = ValueNotifier<String>(initial);
+
+  /// 已接收的全部文字（流式时增量累加）
+  final ValueNotifier<String> text;
+
+  /// 回复流是否进行中（还会收到 delta）
+  bool streaming;
+
+  /// 是否还在播放打字动画（放完后换成静态文本）
+  bool animating;
+}
+
+class _ErrorEntry extends _Entry {
+  const _ErrorEntry(this.message);
+  final String message;
+}
+
 class _PhoneScreenState extends State<PhoneScreen> {
   VoiceService? _voice;
   StreamSubscription<VoiceEvent>? _sub;
-  final List<VoiceEvent> _log = [];
+  final List<_Entry> _entries = [];
   final ScrollController _logScroll = ScrollController();
 
   @override
@@ -55,15 +87,74 @@ class _PhoneScreenState extends State<PhoneScreen> {
 
   void _onEvent(VoiceEvent event) {
     if (!mounted) return;
-    setState(() => _log.add(event));
-    // 新字幕出现后自动滚到底部，满屏时不用手动翻
+    final structural = _applyEvent(event);
+    if (structural) setState(() {});
+    _scrollFollow();
+  }
+
+  /// 把事件应用到字幕列表；返回 true 表示需要 setState（新增/收尾等结构变化）。
+  /// 文字增量只追加到 ValueNotifier，打字组件自己监听刷新，不必整页重建。
+  bool _applyEvent(VoiceEvent event) {
+    switch (event) {
+      case VoiceUserText():
+        _finalizeStreaming();
+        _entries.add(_UserEntry(event.text));
+        return true;
+      case VoiceAssistantDelta():
+        final last = _entries.isNotEmpty ? _entries.last : null;
+        if (last is _AssistantEntry && last.streaming) {
+          last.text.value += event.text;
+          return false;
+        }
+        final entry = _AssistantEntry(event.text, streaming: true);
+        _entries.add(entry);
+        return true;
+      case VoiceAssistantText():
+        final last = _entries.isNotEmpty ? _entries.last : null;
+        if (last is _AssistantEntry && last.streaming) {
+          last.text.value = event.text; // 以后端全文为准
+          last.streaming = false; // 打字动画继续放完
+          return true;
+        }
+        // 没收到过 delta（旧后端）：整条打字显示
+        _entries.add(_AssistantEntry(event.text));
+        return true;
+      case VoiceAssistantPartial():
+        final last = _entries.isNotEmpty ? _entries.last : null;
+        if (last is _AssistantEntry && last.streaming) {
+          last.streaming = false;
+          last.animating = false; // 打断：立即定格已收到的部分
+          return true;
+        }
+        if (event.text.trim().isNotEmpty) {
+          _entries.add(_AssistantEntry(event.text, animating: false));
+          return true;
+        }
+        return false;
+      case VoiceError():
+        _finalizeStreaming();
+        _entries.add(_ErrorEntry(event.message));
+        return true;
+    }
+  }
+
+  /// 当前轮被打断/出错：正在打字的气泡立即定格
+  void _finalizeStreaming() {
+    final last = _entries.isNotEmpty ? _entries.last : null;
+    if (last is _AssistantEntry && last.streaming) {
+      last.streaming = false;
+      last.animating = false;
+    }
+  }
+
+  /// 新字幕/打字推进后跟随滚动：在底部附近才自动跳到底部
+  void _scrollFollow() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_logScroll.hasClients) return;
-      _logScroll.animateTo(
-        _logScroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
+      final pos = _logScroll.position;
+      if (pos.maxScrollExtent - pos.pixels < 120) {
+        _logScroll.jumpTo(pos.maxScrollExtent);
+      }
     });
   }
 
@@ -113,12 +204,12 @@ class _PhoneScreenState extends State<PhoneScreen> {
           final ttsBusy = voice?.ttsPlaying.value ?? false;
 
           final Widget center;
-          if (_log.isNotEmpty) {
+          if (_entries.isNotEmpty) {
             center = ListView.builder(
               controller: _logScroll,
               padding: const EdgeInsets.all(12),
-              itemCount: _log.length,
-              itemBuilder: (context, i) => _eventTile(_log[i]),
+              itemCount: _entries.length,
+              itemBuilder: (context, i) => _entryTile(_entries[i]),
             );
           } else if (!active || !conn) {
             center = Center(
@@ -270,24 +361,47 @@ class _PhoneScreenState extends State<PhoneScreen> {
     );
   }
 
-  Widget _eventTile(VoiceEvent event) {
+  Widget _entryTile(_Entry entry) {
     final Widget child;
-    switch (event) {
-      case VoiceUserText():
+    switch (entry) {
+      case _UserEntry():
         child = Align(
           alignment: Alignment.centerRight,
-          child: _bubble(context.strs.userBubble, event.text, isUser: true),
+          child: _bubble(context.strs.userBubble, entry.text, isUser: true),
         );
-      case VoiceAssistantText():
+      case _AssistantEntry():
+        const style = TextStyle(
+          fontSize: 15,
+          height: 1.4,
+          color: AppTheme.textPrimary,
+        );
+        final Widget content;
+        if (entry.animating) {
+          content = TypewriterText(
+            buffer: entry.text,
+            done: !entry.streaming,
+            style: style,
+            onProgress: _scrollFollow,
+            onFinished: () {
+              if (!mounted) return;
+              setState(() => entry.animating = false);
+            },
+          );
+        } else {
+          content = ValueListenableBuilder<String>(
+            valueListenable: entry.text,
+            builder: (context, text, _) => Text(text, style: style),
+          );
+        }
         child = Align(
           alignment: Alignment.centerLeft,
-          child: _bubble('AI', event.text, isUser: false),
+          child: _bubbleWith('AI', content),
         );
-      case VoiceError():
+      case _ErrorEntry():
         child = Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Text(
-            event.message,
+            entry.message,
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.redAccent, fontSize: 13),
           ),
@@ -297,6 +411,21 @@ class _PhoneScreenState extends State<PhoneScreen> {
   }
 
   Widget _bubble(String name, String text, {required bool isUser}) {
+    return _bubbleWith(
+      name,
+      Text(
+        text,
+        style: TextStyle(
+          fontSize: 15,
+          height: 1.4,
+          color: isUser ? Colors.white : AppTheme.textPrimary,
+        ),
+      ),
+      isUser: isUser,
+    );
+  }
+
+  Widget _bubbleWith(String name, Widget content, {bool isUser = false}) {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -313,14 +442,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
         ),
         border: isUser ? null : Border.all(color: AppTheme.border),
       ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 15,
-          height: 1.4,
-          color: isUser ? Colors.white : AppTheme.textPrimary,
-        ),
-      ),
+      child: content,
     );
   }
 }

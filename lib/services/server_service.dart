@@ -1,8 +1,9 @@
 // 服务器接口封装：连接测试、角色、会话、聊天
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
 import 'api_client.dart';
@@ -120,6 +121,86 @@ class ServerService {
   Future<ChatResult> sendMessage(String message) async {
     final resp = await _dio.post('/api/chat', data: {'message': message});
     return ChatResult.fromJson(resp.data as Map<String, dynamic>);
+  }
+
+  /// 流式聊天（POST /api/chat stream:true，SSE）：
+  /// LLM 边生成边下发 {"delta": "增量"}，最后发 {"done": true, "reply": "全文", ...}。
+  /// [onDelta] 在每个增量到达时回调（打字显示用）；返回值以后端全文为准。
+  ///
+  /// 兼容性：旧后端不支持 stream 时原样返回 JSON，此处识别后直接解析；
+  /// Web 平台 dio 不支持响应流，自动退回非流式接口。
+  Future<ChatResult> sendMessageStream(
+    String message, {
+    void Function(String delta)? onDelta,
+  }) async {
+    if (kIsWeb) {
+      final r = await sendMessage(message);
+      onDelta?.call(r.reply);
+      return r;
+    }
+    final resp = await _dio.post<ResponseBody>(
+      '/api/chat',
+      data: {'message': message, 'stream': true},
+      options: Options(
+        responseType: ResponseType.stream,
+        // SSE 按增量持续到达，放宽"两次数据间隔"超时
+        receiveTimeout: const Duration(minutes: 5),
+      ),
+    );
+    final body = resp.data;
+    if (body == null) {
+      throw Exception('服务器无响应');
+    }
+    final contentType = (resp.headers.value('content-type') ?? '').toLowerCase();
+    if (contentType.contains('application/json')) {
+      // 旧后端：不支持 stream，直接返回整段 JSON
+      final bytes = <int>[];
+      await for (final chunk in body.stream) {
+        bytes.addAll(chunk);
+      }
+      return ChatResult.fromJson(
+          jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>);
+    }
+
+    final sb = StringBuffer();
+    var sseBuf = '';
+    await for (final chunk in body.stream) {
+      sseBuf += utf8.decode(chunk, allowMalformed: true);
+      int idx;
+      while ((idx = sseBuf.indexOf('\n\n')) >= 0) {
+        final raw = sseBuf.substring(0, idx).trim();
+        sseBuf = sseBuf.substring(idx + 2);
+        if (!raw.startsWith('data:')) continue;
+        final payload = raw.substring(5).trim();
+        if (payload.isEmpty) continue;
+        dynamic json;
+        try {
+          json = jsonDecode(payload);
+        } catch (_) {
+          continue;
+        }
+        if (json is! Map<String, dynamic>) continue;
+        if (json['error'] != null) {
+          throw Exception(json['error'].toString());
+        }
+        final delta = json['delta'];
+        if (delta is String && delta.isNotEmpty) {
+          sb.write(delta);
+          onDelta?.call(delta);
+        }
+        if (json['done'] == true) {
+          final reply = (json['reply'] ?? sb.toString()).toString();
+          final name = (json['display_name'] ?? 'AI').toString();
+          return ChatResult(reply: reply, displayName: name, history: const []);
+        }
+      }
+    }
+    // 流意外结束且没有 done：把已收到的增量当结果
+    return ChatResult(
+      reply: sb.toString(),
+      displayName: 'AI',
+      history: const [],
+    );
   }
 
   Future<void> selectCharacter(String id) async {

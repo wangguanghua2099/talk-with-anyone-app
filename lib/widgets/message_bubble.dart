@@ -3,11 +3,13 @@
 //   AI   消息：头像在左、名称左对齐、白底气泡
 //   用户消息：头像在右、名称右对齐、蓝底气泡
 // 头像缺省用首字符占位：用户绿色 #4CD964，AI 蓝 #007AFF。
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../theme.dart';
 import 'avatar.dart';
+import 'typewriter_text.dart';
 
 /// 消息之间的时间分隔条（微信风格：间隔>1分钟才显示，居中灰底小标签）
 class TimeHeader extends StatelessWidget {
@@ -71,7 +73,12 @@ class MessageBubble extends StatelessWidget {
     required this.aiName,
     this.aiAvatar,
     this.isReading = false,
+    this.isFlash = false,
     this.onTap,
+    this.streamText,
+    this.streamDone = false,
+    this.onStreamFinished,
+    this.onStreamProgress,
   });
 
   final ChatMessage message;
@@ -85,7 +92,17 @@ class MessageBubble extends StatelessWidget {
   final String? aiAvatar;
 
   final bool isReading;
+
+  /// 搜索跳转定位后的短暂高亮（对应网页版 message-flash）
+  final bool isFlash;
   final VoidCallback? onTap;
+
+  /// 流式打字显示：非空时气泡正文用 TypewriterText 渲染（忽略 message.content），
+  /// 全部显示完后回调 onStreamFinished（父级再换成最终静态文本）
+  final ValueListenable<String>? streamText;
+  final bool streamDone;
+  final VoidCallback? onStreamFinished;
+  final VoidCallback? onStreamProgress;
 
   @override
   Widget build(BuildContext context) {
@@ -104,7 +121,7 @@ class MessageBubble extends StatelessWidget {
       margin: const EdgeInsets.only(top: 4),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isReading
+        color: isReading || isFlash
             ? (isUser
                 ? AppTheme.primary.withValues(alpha: 0.7)
                 : const Color(0xFFE8F4FF))
@@ -115,18 +132,30 @@ class MessageBubble extends StatelessWidget {
           bottomLeft: Radius.circular(isUser ? 16 : 4),
           bottomRight: Radius.circular(isUser ? 4 : 16),
         ),
-        border: isReading
+        border: isReading || isFlash
             ? Border.all(color: AppTheme.primary, width: 2)
             : (isUser ? null : Border.all(color: AppTheme.border)),
       ),
-      child: Text(
-        message.content,
-        style: TextStyle(
-          fontSize: 15,
-          height: 1.4,
-          color: isUser ? Colors.white : AppTheme.textPrimary,
-        ),
-      ),
+      child: streamText != null
+          ? TypewriterText(
+              buffer: streamText!,
+              done: streamDone,
+              style: TextStyle(
+                fontSize: 15,
+                height: 1.4,
+                color: isUser ? Colors.white : AppTheme.textPrimary,
+              ),
+              onFinished: onStreamFinished,
+              onProgress: onStreamProgress,
+            )
+          : Text(
+              message.content,
+              style: TextStyle(
+                fontSize: 15,
+                height: 1.4,
+                color: isUser ? Colors.white : AppTheme.textPrimary,
+              ),
+            ),
     );
 
     final content = Column(

@@ -42,6 +42,14 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _charsRequested = false;
   String _convTitle = '';
 
+  /// 流式回复状态：占位 assistant 消息的下标 + 打字机缓冲。
+  /// delta 累加进 _streamText（TypewriterText 按节奏揭示），
+  /// 收到 done 后等打字放完，再换成最终静态消息。
+  int? _streamIndex;
+  ValueNotifier<String>? _streamText;
+  bool _streamDone = false;
+  ChatResult? _doneResult;
+
   /// 当前用户昵称/头像（来自服务器全局配置，用于气泡头部显示）
   String _userName = '';
   String _userAvatar = '';
@@ -54,6 +62,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// 每条消息的滚动定位键（朗读高亮自动滚动用）
   final List<GlobalKey> _msgKeys = [];
+
+  /// 搜索跳转定位后短暂高亮的消息下标（2 秒后清除，对应网页版 message-flash）
+  int? _flashIndex;
+  Timer? _flashTimer;
 
   /// 按住说话状态
   PttStatus _pttStatus = PttStatus.none;
@@ -78,6 +90,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _input.dispose();
     _scroll.dispose();
+    _flashTimer?.cancel();
     _tts?.dispose();
     _ptt?.dispose();
     _reader?.stop();
@@ -133,6 +146,7 @@ class _ChatScreenState extends State<ChatScreen> {
             setState(() {
               _messages.clear();
               _convTitle = '';
+              _resetStreamState();
               _syncMessageKeys();
             });
           }
@@ -145,9 +159,14 @@ class _ChatScreenState extends State<ChatScreen> {
             ..clear()
             ..addAll(data.messages);
           _convTitle = data.conversation.title;
+          _resetStreamState();
           _syncMessageKeys();
         });
-        _scrollToBottom();
+        if (app.pendingJumpMessageIndex != null) {
+          _consumePendingJump();
+        } else {
+          _scrollToBottom();
+        }
         return;
       } catch (_) {
         // 网络不可用：标记离线，回退到缓存的当前会话消息
@@ -164,9 +183,53 @@ class _ChatScreenState extends State<ChatScreen> {
         ..clear()
         ..addAll(cached?.messages ?? const <ChatMessage>[]);
       _convTitle = cached?.conversation.title ?? '';
+      _resetStreamState();
       _syncMessageKeys();
     });
-    if (cached != null) _scrollToBottom();
+    if (app.pendingJumpMessageIndex != null) {
+      _consumePendingJump();
+    } else if (cached != null) {
+      _scrollToBottom();
+    }
+  }
+
+  /// 清掉进行中的流式回复状态（切换/重载会话、发送结束时）
+  void _resetStreamState() {
+    _streamIndex = null;
+    _streamText = null;
+    _streamDone = false;
+    _doneResult = null;
+  }
+
+  /// 流式期间跟随滚动：用户在底部附近才自动跳到底部，翻看历史时不打扰
+  void _liveScroll() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final pos = _scroll.position;
+      if (pos.maxScrollExtent - pos.pixels < 120) {
+        _scroll.jumpTo(pos.maxScrollExtent);
+      }
+    });
+  }
+
+  /// 搜索跳转：抽屉设置了 pendingJumpMessageIndex 时，等本会话消息
+  /// 渲染完成后滚动定位并短暂高亮该消息（然后清掉待跳转标记）
+  void _consumePendingJump() {
+    final app = context.read<AppState>();
+    final idx = app.pendingJumpMessageIndex;
+    if (idx == null) return;
+    app.pendingJumpMessageIndex = null;
+    if (idx < 0 || idx >= _messages.length) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _scrollToMessage(idx);
+      _flashTimer?.cancel();
+      setState(() => _flashIndex = idx);
+      _flashTimer = Timer(const Duration(seconds: 2), () {
+        if (!mounted) return;
+        setState(() => _flashIndex = null);
+      });
+    });
   }
 
   /// 按消息列表重建定位键（每次 setState 改消息内容后调用）
@@ -217,27 +280,73 @@ class _ChatScreenState extends State<ChatScreen> {
         content: text,
         timestamp: DateTime.now().toIso8601String(),
       ));
+      // 流式占位消息：正文随 delta 增长，由打字机逐步揭示
+      _resetStreamState();
+      _streamText = ValueNotifier<String>('');
+      _messages.add(ChatMessage.assistant(
+          '', app.currentCharacter?.displayName ?? 'AI'));
+      _streamIndex = _messages.length - 1;
       _syncMessageKeys();
     });
     _input.clear();
     _scrollToBottom();
+    ChatResult? result;
+    Object? error;
     try {
-      final result = await service.sendMessage(text);
-      if (!mounted) return;
+      result = await service.sendMessageStream(text, onDelta: (delta) {
+        if (!mounted) return;
+        _streamText?.value += delta; // TypewriterText 自行按节奏揭示
+      });
+    } catch (e) {
+      error = e;
+    }
+    if (!mounted) return;
+    if (error != null) {
+      final partial = _streamText?.value ?? '';
       setState(() {
-        _messages.add(ChatMessage.assistant(result.reply, result.displayName));
+        final idx = _streamIndex;
+        if (idx != null) {
+          if (partial.trim().isEmpty) {
+            _messages[idx] = ChatMessage.assistant(
+                '${context.strs.sendFailed}$error', 'AI');
+          } else {
+            // 已收到部分内容：保留为普通消息
+            _messages[idx] = ChatMessage.assistant(
+                partial, app.currentCharacter?.displayName ?? 'AI');
+          }
+        }
+        _resetStreamState();
         _sending = false;
         _syncMessageKeys();
       });
       _scrollToBottom();
-      _speak(result.reply);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _sending = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${context.strs.sendFailed}$e')),
+        SnackBar(content: Text('${context.strs.sendFailed}$error')),
       );
+      return;
     }
+    // 后端全文为准（补齐可能的差额），等打字动画放完再换成静态文本
+    final done = result!;
+    _doneResult = done;
+    _streamText?.value = done.reply;
+    setState(() => _streamDone = true);
+    _liveScroll();
+    _speak(done.reply);
+  }
+
+  /// 打字动画放完：把占位消息换成最终静态消息（与网页版行为一致）
+  void _finishStreamBubble() {
+    final result = _doneResult;
+    final idx = _streamIndex;
+    if (result == null || idx == null || idx >= _messages.length) return;
+    setState(() {
+      _messages[idx] =
+          ChatMessage.assistant(result.reply, result.displayName);
+      _resetStreamState();
+      _sending = false;
+      _syncMessageKeys();
+    });
+    _scrollToBottom();
   }
 
   Future<void> _speak(String text) async {
@@ -611,7 +720,12 @@ class _ChatScreenState extends State<ChatScreen> {
                           aiName: _aiNameFor(m),
                           aiAvatar: _aiAvatarFor(m),
                           isReading: reading && i == _reader?.readingIndex,
+                          isFlash: i == _flashIndex,
                           onTap: () => _onMessageTap(i),
+                          streamText: i == _streamIndex ? _streamText : null,
+                          streamDone: _streamDone,
+                          onStreamFinished: _finishStreamBubble,
+                          onStreamProgress: _liveScroll,
                         ),
                       );
                     },
